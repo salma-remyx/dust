@@ -14,6 +14,7 @@ import {
   buildAuditLogTarget,
   emitAuditLogEventDirect,
 } from "@app/lib/api/audit/workos_audit";
+import { isServerSideMCPToolConfiguration } from "@app/lib/actions/types/guards";
 import type { MCPToolRetryPolicyType } from "@app/lib/api/mcp";
 import { getRetryPolicyFromToolConfiguration } from "@app/lib/api/mcp";
 import { createMCPAction } from "@app/lib/api/mcp/create_mcp";
@@ -291,6 +292,9 @@ async function createActionForTool(
             conversationId: conversation.sId,
             created: Date.now(),
             inputs: action.augmentedInputs,
+            editable: isServerSideMCPToolConfiguration(actionConfiguration)
+              ? actionConfiguration.editable
+              : undefined,
             messageId: agentMessage.sId,
             stake: actionConfiguration.permission,
             userId: auth.user()?.sId,
