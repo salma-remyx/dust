@@ -224,6 +224,7 @@ export class AgentMCPActionModel extends WorkspaceAwareModel<AgentMCPActionModel
 
   declare citationsAllocated: number;
   declare augmentedInputs: Record<string, unknown>;
+  declare userEditedInputs: Record<string, unknown> | null;
   declare toolConfiguration: LightMCPToolConfigurationType;
   declare stepContext: StepContext;
 
@@ -269,6 +270,11 @@ AgentMCPActionModel.init(
       type: DataTypes.JSONB,
       allowNull: false,
       defaultValue: {},
+    },
+    userEditedInputs: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      defaultValue: null,
     },
     toolConfiguration: {
       type: DataTypes.JSONB,
