@@ -782,6 +782,7 @@ const WhitelistableFeaturesSchema = FlexibleEnumSchema<
   | "use_new_llm_router"
   | "live_speech_to_text"
   | "force_us_api_url"
+  | "editable_tool_inputs"
 >();
 
 export type WhitelistableFeature = z.infer<typeof WhitelistableFeaturesSchema>;
