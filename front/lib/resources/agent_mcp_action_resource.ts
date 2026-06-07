@@ -1265,6 +1265,7 @@ export class AgentMCPActionResource extends BaseResource<AgentMCPActionModel> {
       toolName,
       mcpServerId,
       params: this.augmentedInputs,
+      userEditedInputs: this.userEditedInputs,
       status: this.status,
       step: this.stepContent.step,
       executionDurationMs: this.executionDurationMs,
@@ -1281,12 +1282,16 @@ export class AgentMCPActionResource extends BaseResource<AgentMCPActionModel> {
     internalMCPServerName: InternalMCPServerNameType | null,
     toolName: string
   ): ToolDisplayLabels | null {
+    const inputs = {
+      ...this.augmentedInputs,
+      ...(this.userEditedInputs ?? {}),
+    };
     return (
       getToolDisplayLabels({
         internalMCPServerName,
         mcpServerName: this.toolConfiguration.mcpServerName,
         toolName,
-        inputs: this.augmentedInputs,
+        inputs,
       }) ??
       this.toolConfiguration.displayLabels ??
       null
