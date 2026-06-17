@@ -137,6 +137,7 @@ export type UserMessageContext = {
   lastTriggerRunAt?: number | null;
   clientSideMCPServerIds?: string[];
   selectedMCPServerViewIds?: string[];
+  selectedRestrictedSpaceIds?: string[];
   apiKeyId?: number | null;
   authMethod?: string | null;
 };
