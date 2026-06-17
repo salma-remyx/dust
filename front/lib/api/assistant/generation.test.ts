@@ -284,6 +284,65 @@ describe("constructPromptMultiActions - system prompt stability", () => {
     expect(ephemeralContext).toHaveLength(0);
   });
 
+  it("should keep selected-space-scoped prompt sections out of cached tiers", () => {
+    const deepDiveConfig = {
+      ...agentConfig1,
+      sId: GLOBAL_AGENTS_SID.DEEP_DIVE,
+      scope: "global" as const,
+    };
+
+    const baseParams = {
+      userMessage: userMessage1,
+      agentConfiguration: deepDiveConfig,
+      model: modelConfig,
+      hasAvailableActions: true,
+      agentsList: null,
+      systemSkills: [],
+      enabledSkills: [],
+      equippedSkills: [],
+    };
+
+    const cachedSections = normalizePrompt(
+      constructPromptMultiActions(authenticator1, baseParams)
+    );
+    expect(cachedSections.instructions[0]?.content).toContain("## SKILLS");
+    expect(
+      cachedSections.sharedContext.some((section) =>
+        section.content.trim().startsWith("# TOOLS")
+      )
+    ).toBe(true);
+    expect(
+      cachedSections.ephemeralContext.some(
+        (section) =>
+          section.content.includes("## SKILLS") ||
+          section.content.trim().startsWith("# TOOLS")
+      )
+    ).toBe(false);
+
+    const scopedSections = normalizePrompt(
+      constructPromptMultiActions(authenticator1, {
+        ...baseParams,
+        hasSelectedConversationSpaces: true,
+      })
+    );
+    expect(scopedSections.instructions[0]?.content).not.toContain("## SKILLS");
+    expect(
+      scopedSections.sharedContext.some((section) =>
+        section.content.trim().startsWith("# TOOLS")
+      )
+    ).toBe(false);
+    expect(
+      scopedSections.ephemeralContext.some((section) =>
+        section.content.trim().startsWith("# TOOLS")
+      )
+    ).toBe(true);
+    expect(
+      scopedSections.ephemeralContext.some((section) =>
+        section.content.includes("## SKILLS")
+      )
+    ).toBe(true);
+  });
+
   it("should place workspace context in shared tier and user context in ephemeral tier for sidekick agent", () => {
     const sidekickConfig = {
       ...agentConfig1,

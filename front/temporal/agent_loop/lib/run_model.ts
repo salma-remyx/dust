@@ -10,6 +10,7 @@ import { isServerSideMCPServerConfigurationWithName } from "@app/lib/actions/typ
 import { computeStepContexts } from "@app/lib/actions/utils";
 import { createClientSideMCPServerConfigurations } from "@app/lib/api/actions/mcp_client_side";
 import { getAgentConfigurationsForView } from "@app/lib/api/assistant/configuration/views";
+import { getEffectiveSpaceIdsForAgentRun } from "@app/lib/api/assistant/conversation/selected_spaces";
 import { renderConversationForModel } from "@app/lib/api/assistant/conversation_rendering";
 import { categorizeConversationRenderErrorMessage } from "@app/lib/api/assistant/errors";
 import { constructPromptMultiActions } from "@app/lib/api/assistant/generation";
@@ -232,6 +233,7 @@ export async function runModel(
     enabledSkills,
     systemSkills,
     equippedSkills,
+    hasSelectedConversationSpaces,
     hasConditionalJITTools,
     mcpActions,
     mcpToolsListingError,
@@ -258,9 +260,21 @@ export async function runModel(
 
     const { enabledSkills, systemSkills, equippedSkills } =
       await SkillResource.listForAgentLoop(auth, runAgentData);
+    const effectiveSpaceIds = await getEffectiveSpaceIdsForAgentRun(auth, {
+      agentConfiguration,
+      conversation,
+    });
+    const requestedSpaceIds = new Set(agentConfiguration.requestedSpaceIds);
+    const effectiveSpaceIdsSet = new Set(effectiveSpaceIds);
+    const hasSelectedConversationSpaces =
+      effectiveSpaceIdsSet.size !== requestedSpaceIds.size ||
+      Array.from(effectiveSpaceIdsSet).some(
+        (spaceId) => !requestedSpaceIds.has(spaceId)
+      );
 
     const skillServers = await getSkillServers(auth, {
       agentConfiguration,
+      effectiveSpaceIds,
       skills: [...systemSkills, ...enabledSkills],
     });
 
@@ -282,6 +296,7 @@ export async function runModel(
 
     return {
       hasConditionalJITTools,
+      hasSelectedConversationSpaces,
       enabledSkills,
       equippedSkills,
       systemSkills,
@@ -414,6 +429,7 @@ export async function runModel(
     isNewFileExplorer,
     hasSandboxTools,
     disableFormattingPrompt,
+    hasSelectedConversationSpaces,
   });
   const leadingMessages = removeNulls([
     renderEquippedSkillsUserMessage(equippedSkills),

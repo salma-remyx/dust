@@ -10,6 +10,7 @@ import { ConversationSelectedSpaceResource } from "@app/lib/resources/conversati
 import { SpaceResource } from "@app/lib/resources/space_resource";
 import { getResourceIdFromSId } from "@app/lib/resources/string_ids";
 import { withTransaction } from "@app/lib/utils/sql_utils";
+import type { LightAgentConfigurationType } from "@app/types/assistant/agent";
 import {
   type ConversationSelectedSpacesResponse,
   type ConversationWithoutContentType,
@@ -289,4 +290,46 @@ export async function addSelectedConversationSpaces(
   }
 
   return result;
+}
+
+export async function getEffectiveSpaceIdsForAgentRun(
+  auth: Authenticator,
+  {
+    agentConfiguration,
+    conversation,
+    transaction,
+  }: {
+    agentConfiguration: LightAgentConfigurationType;
+    conversation: ConversationWithoutContentType;
+    transaction?: Transaction;
+  }
+): Promise<string[]> {
+  const selectedSpaces =
+    await ConversationSelectedSpaceResource.listActiveSpacesByConversation(
+      auth,
+      {
+        conversation,
+        transaction,
+      }
+    );
+
+  if (selectedSpaces.length === 0) {
+    return agentConfiguration.requestedSpaceIds;
+  }
+
+  const selectableSpacesResult = await validateSelectableRestrictedSpaces(
+    auth,
+    {
+      spaceIds: selectedSpaces.map((space) => space.sId),
+      transaction,
+    }
+  );
+  if (selectableSpacesResult.isErr()) {
+    return agentConfiguration.requestedSpaceIds;
+  }
+
+  return uniq([
+    ...agentConfiguration.requestedSpaceIds,
+    ...selectableSpacesResult.value.map((space) => space.sId),
+  ]);
 }

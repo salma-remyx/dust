@@ -13,6 +13,7 @@ vi.mock("@app/lib/api/audit/workos_audit", async (importOriginal) => {
 
 import {
   addSelectedConversationSpaces,
+  getEffectiveSpaceIdsForAgentRun,
   listSelectableRestrictedSpaces,
   type SelectedConversationSpacesError,
   validateSelectableRestrictedSpaces,
@@ -20,6 +21,7 @@ import {
 import { Authenticator } from "@app/lib/auth";
 import { ConversationSelectedSpaceResource } from "@app/lib/resources/conversation_selected_space_resource";
 import type { SpaceResource } from "@app/lib/resources/space_resource";
+import { AgentConfigurationFactory } from "@app/tests/utils/AgentConfigurationFactory";
 import { ConversationFactory } from "@app/tests/utils/ConversationFactory";
 import { FeatureFlagFactory } from "@app/tests/utils/FeatureFlagFactory";
 import { createResourceTest } from "@app/tests/utils/generic_resource_tests";
@@ -238,5 +240,54 @@ describe("selected conversation Spaces", () => {
       )
     ).toEqual([]);
     expect(mockEmitAuditLogEvent).not.toHaveBeenCalled();
+  });
+
+  it("uses selected Spaces as effective runtime scope when still valid", async () => {
+    await enableFeature();
+    const selectedSpace = await memberRestrictedSpace();
+    const requestedSpaceModelIds = [globalSpace.id];
+    const agentConfiguration = await AgentConfigurationFactory.createTestAgent(
+      auth,
+      { requestedSpaceIds: requestedSpaceModelIds }
+    );
+    const conv = await conversation();
+
+    await ConversationSelectedSpaceResource.upsertForConversation(auth, {
+      conversation: conv,
+      origin: "input_bar",
+      spaces: [selectedSpace],
+    });
+
+    const effectiveSpaceIds = await getEffectiveSpaceIdsForAgentRun(auth, {
+      agentConfiguration,
+      conversation: conv,
+    });
+
+    expect(effectiveSpaceIds).toEqual(
+      expect.arrayContaining([globalSpace.sId, selectedSpace.sId])
+    );
+  });
+
+  it("ignores selected Spaces at runtime when the feature flag is disabled", async () => {
+    const selectedSpace = await memberRestrictedSpace();
+    const requestedSpaceModelIds = [globalSpace.id];
+    const agentConfiguration = await AgentConfigurationFactory.createTestAgent(
+      auth,
+      { requestedSpaceIds: requestedSpaceModelIds }
+    );
+    const conv = await conversation();
+
+    await ConversationSelectedSpaceResource.upsertForConversation(auth, {
+      conversation: conv,
+      origin: "input_bar",
+      spaces: [selectedSpace],
+    });
+
+    await expect(
+      getEffectiveSpaceIdsForAgentRun(auth, {
+        agentConfiguration,
+        conversation: conv,
+      })
+    ).resolves.toEqual([globalSpace.sId]);
   });
 });

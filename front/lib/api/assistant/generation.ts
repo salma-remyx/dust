@@ -386,6 +386,7 @@ export function constructPromptMultiActions(
     isNewFileExplorer = false,
     hasSandboxTools = false,
     disableFormattingPrompt = false,
+    hasSelectedConversationSpaces = false,
   }: {
     userMessage: UserMessageType;
     agentConfiguration: AgentConfigurationType;
@@ -407,6 +408,7 @@ export function constructPromptMultiActions(
     isNewFileExplorer?: boolean;
     hasSandboxTools?: boolean;
     disableFormattingPrompt?: boolean;
+    hasSelectedConversationSpaces?: boolean;
   }
 ): SystemPromptSections {
   const owner = auth.workspace();
@@ -456,17 +458,18 @@ export function constructPromptMultiActions(
     // Structured form with 3 cache tiers, ordered from most stable to most volatile.
     //
     // Instructions (long cache): stable per agent config, covering agent instructions, skills,
-    // format docs, and guidelines.
+    // format docs, and guidelines. If selected conversation Spaces are active, skill
+    // instructions can depend on per-conversation scope and must stay out of this tier.
     //
     // Shared context (short cache): workspace-scoped data shared across users, covering the tools
     // section (directives + server listing), date, toolsets, and workspace info. A cache breakpoint
     // here lets different users in the same workspace share this prefix.
     //
-    // Ephemeral context (no breakpoint): per-call data, covering branch lineage, memories, and user
-    // profile.
+    // Ephemeral context (no breakpoint): per-call data, covering selected-space-scoped tools,
+    // branch lineage, memories, and user profile.
     const fullInstructions = [
       instructionsContent,
-      skillsSection,
+      ...(hasSelectedConversationSpaces ? [] : [skillsSection]),
       attachmentsSection,
       pastedContentSection,
       guidelinesSection,
@@ -479,13 +482,21 @@ export function constructPromptMultiActions(
     // change whenever a (conditional) JIT server is added mid-run, so keeping it out of the
     // instructions block lets that block stay cache-stable across server additions.
     const sharedContext: SystemPromptContext[] = [
-      { role: "context" as const, content: toolsSection },
+      ...(hasSelectedConversationSpaces
+        ? []
+        : [{ role: "context" as const, content: toolsSection }]),
       { role: "context" as const, content: contextSection },
       { role: "context" as const, content: toolsetsContext ?? "" },
       { role: "context" as const, content: workspaceContext ?? "" },
     ].filter((s) => s.content.trim() !== "");
 
     const ephemeralContext: SystemPromptContext[] = [
+      ...(hasSelectedConversationSpaces
+        ? ([
+            { role: "context" as const, content: toolsSection },
+            { role: "context" as const, content: skillsSection },
+          ] satisfies SystemPromptContext[])
+        : []),
       { role: "context" as const, content: branchContextSection },
       { role: "context" as const, content: memoriesContext ?? "" },
       { role: "context" as const, content: userContext ?? "" },

@@ -2,6 +2,7 @@ import { fetchMCPServerActionConfigurations } from "@app/lib/actions/configurati
 import type { MCPServerConfigurationType } from "@app/lib/actions/mcp";
 import { autoInternalMCPServerNameToSId } from "@app/lib/actions/mcp_helper";
 import { updateAgentRequirements } from "@app/lib/api/assistant/configuration/agent_requirements";
+import { getEffectiveSpaceIdsForAgentRun } from "@app/lib/api/assistant/conversation/selected_spaces";
 import { getAgentConfigurationRequirementsFromCapabilities } from "@app/lib/api/assistant/permissions";
 import {
   filterUsersWithSharedMembership,
@@ -769,10 +770,15 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
       (def) => !agentLoopData || !def.isDisabledForAgentLoop?.(agentLoopData)
     );
 
+    const effectiveSpaceIds = agentLoopData
+      ? await getEffectiveSpaceIdsForAgentRun(auth, {
+          agentConfiguration: agentLoopData.agentConfiguration,
+          conversation: agentLoopData.conversation,
+          transaction,
+        })
+      : [];
     const requestedSpaceModelIds = removeNulls(
-      (agentLoopData?.agentConfiguration?.requestedSpaceIds ?? []).map(
-        getResourceIdFromSId
-      )
+      effectiveSpaceIds.map(getResourceIdFromSId)
     );
 
     // Batch-fetch MCP server views for all enabled global skills in a single query.
@@ -802,6 +808,7 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
       (def) =>
         this.fromGlobalSkill(auth, def, {
           agentLoopData,
+          effectiveSpaceIds,
           mcpServerViews,
           withInstructions,
         }),
@@ -1683,10 +1690,12 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
     def: SkillDefinition,
     {
       agentLoopData,
+      effectiveSpaceIds,
       mcpServerViews,
       withInstructions = true,
     }: {
       agentLoopData?: AgentLoopExecutionData;
+      effectiveSpaceIds?: string[];
       mcpServerViews: MCPServerViewResource[];
       withInstructions?: boolean;
     }
@@ -1694,7 +1703,8 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
     const workspaceId = auth.getNonNullableWorkspace().id;
 
     const { agentConfiguration } = agentLoopData ?? {};
-    const requestedSpaceIds = agentConfiguration?.requestedSpaceIds ?? [];
+    const requestedSpaceIds =
+      effectiveSpaceIds ?? agentConfiguration?.requestedSpaceIds ?? [];
     const requestedSpaceModelIds = removeNulls(
       requestedSpaceIds.map(getResourceIdFromSId)
     );
