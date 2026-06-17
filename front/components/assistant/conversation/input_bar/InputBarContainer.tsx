@@ -2,6 +2,7 @@ import { ContextUsageIndicator } from "@app/components/assistant/conversation/in
 import { InputBarAttachmentsPicker } from "@app/components/assistant/conversation/input_bar/InputBarAttachmentsPicker";
 import { InputBarButtons } from "@app/components/assistant/conversation/input_bar/InputBarButtons";
 import type { PendingInputText } from "@app/components/assistant/conversation/input_bar/InputBarContext";
+import { InputBarRestrictedSpacesPicker } from "@app/components/assistant/conversation/input_bar/InputBarRestrictedSpacesPicker";
 import {
   INPUT_BAR_COMPACT_CONTENT_ENTER_ANIMATION_CLASSES,
   INPUT_BAR_COMPACT_PILL_INNER_CLASSES,
@@ -42,7 +43,10 @@ import { useIsMobile } from "@app/lib/swr/useIsMobile";
 import { classNames } from "@app/lib/utils";
 import type { LightAgentConfigurationType } from "@app/types/assistant/agent";
 import { GLOBAL_AGENTS_SID } from "@app/types/assistant/assistant";
-import type { ConversationWithoutContentType } from "@app/types/assistant/conversation";
+import type {
+  ConversationWithoutContentType,
+  SelectableConversationSpaceType,
+} from "@app/types/assistant/conversation";
 import type {
   RichAgentMention,
   RichMention,
@@ -75,6 +79,7 @@ import {
   DropdownMenuTrigger,
   FilePlus03,
   Globe01,
+  Lock01,
   Plus,
   Toolbar,
   TooltipContent,
@@ -98,6 +103,10 @@ import React, {
 import { InputBarContext } from "./InputBarContext";
 
 const COLLAPSE_TRANSITION = "200ms cubic-bezier(0.34, 1.15, 0.64, 1)";
+const EMPTY_RESTRICTED_SPACE_IDS: string[] = [];
+const EMPTY_SELECTABLE_RESTRICTED_SPACES: SelectableConversationSpaceType[] =
+  [];
+const acceptSelectedRestrictedSpaceIds = async (spaceIds: string[]) => spaceIds;
 
 export const INPUT_BAR_ACTIONS = [
   "capabilities",
@@ -105,6 +114,7 @@ export const INPUT_BAR_ACTIONS = [
   "agents-list",
   "agents-list-with-actions",
   "turn-into-agent",
+  "restricted-spaces",
   "voice",
   "fullscreen",
 ] as const;
@@ -133,6 +143,7 @@ export interface InputBarContainerProps {
   getDraft: () => {
     text: string;
     agentMention?: RichAgentMention | null;
+    selectedRestrictedSpaceIds?: string[];
   } | null;
   defaultAgentId?: string | null;
   isDefaultAgentLoading?: boolean;
@@ -150,10 +161,21 @@ export interface InputBarContainerProps {
   onNodeUnselect: (node: DataSourceViewContentNode) => void;
   onResetMCPServerViews: () => void;
   owner: WorkspaceType;
-  saveDraft: (markdown: string, agentMention?: RichAgentMention | null) => void;
+  saveDraft: (
+    markdown: string,
+    agentMention?: RichAgentMention | null,
+    selectedRestrictedSpaceIds?: string[]
+  ) => void;
   pendingInputText: PendingInputText | null;
   selectedAgent: RichAgentMention | null;
   selectedMCPServerViews: MCPServerViewType[];
+  selectedRestrictedSpaceIds?: string[];
+  selectableRestrictedSpaces?: SelectableConversationSpaceType[];
+  shouldShowRestrictedSpacesAction?: boolean;
+  isSelectableRestrictedSpacesLoading?: boolean;
+  onSelectedRestrictedSpaceIdsChange?: (
+    spaceIds: string[]
+  ) => Promise<string[] | null>;
   stickyMentions?: RichMention[];
   user: UserType | null;
 }
@@ -182,7 +204,12 @@ const InputBarContainer = ({
   onMCPServerViewSelect,
   onMCPServerViewDeselect,
   selectedMCPServerViews,
+  selectedRestrictedSpaceIds = EMPTY_RESTRICTED_SPACE_IDS,
   onResetMCPServerViews,
+  onSelectedRestrictedSpaceIdsChange = acceptSelectedRestrictedSpaceIds,
+  selectableRestrictedSpaces = EMPTY_SELECTABLE_RESTRICTED_SPACES,
+  shouldShowRestrictedSpacesAction = false,
+  isSelectableRestrictedSpacesLoading = false,
   saveDraft,
   user,
   disableAgentSelector,
@@ -276,6 +303,7 @@ const InputBarContainer = ({
     [selectedMCPServerViews]
   );
   const selectedMCPServerViewIdsRef = useRef(selectedMCPServerViewIds);
+  const selectedRestrictedSpaceIdsRef = useRef(selectedRestrictedSpaceIds);
   const shouldEnableSlashSuggestionRef = useRef(shouldEnableSlashSuggestion);
   // The slash suggestion extension captures its options at editor initialization, while the
   // conversation may only be created after the first message; the ref keeps it current.
@@ -293,7 +321,21 @@ const InputBarContainer = ({
   const [selectedServerViewForDetails, setSelectedServerViewForDetails] =
     useState<MCPServerViewType | null>(null);
   selectedMCPServerViewIdsRef.current = selectedMCPServerViewIds;
+  selectedRestrictedSpaceIdsRef.current = selectedRestrictedSpaceIds;
   shouldEnableSlashSuggestionRef.current = shouldEnableSlashSuggestion;
+
+  const selectableRestrictedSpacesById = useMemo(
+    () =>
+      new Map(selectableRestrictedSpaces.map((space) => [space.sId, space])),
+    [selectableRestrictedSpaces]
+  );
+  const selectedRestrictedSpaces = useMemo(
+    () =>
+      selectedRestrictedSpaceIds
+        .map((spaceId) => selectableRestrictedSpacesById.get(spaceId))
+        .filter((space): space is SelectableConversationSpaceType => !!space),
+    [selectableRestrictedSpacesById, selectedRestrictedSpaceIds]
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: ignored using `--suppress`
   const removePastedAttachmentChip = useCallback(
@@ -644,8 +686,53 @@ const InputBarContainer = ({
   editorServiceRef.current = editorService;
   const saveDraftRef = useRef(saveDraft);
   saveDraftRef.current = saveDraft;
+  const selectedSingleAgentRef = useRef(selectedSingleAgent);
+  selectedSingleAgentRef.current = selectedSingleAgent;
   // Skip auto-save (especially clearDraft on empty) until initial content is restored.
   const hasCompletedInitialContentRestoreRef = useRef(false);
+
+  const saveCurrentDraftWithSelectedSpaces = useCallback(
+    (spaceIds: string[]) => {
+      if (!hasCompletedInitialContentRestoreRef.current) {
+        return;
+      }
+
+      const currentEditorService = editorServiceRef.current;
+      const { markdown } = currentEditorService.getMarkdownAndMentions();
+      saveDraftRef.current(
+        currentEditorService.isEmpty() ? "" : markdown,
+        selectedSingleAgentRef.current,
+        spaceIds
+      );
+    },
+    []
+  );
+
+  const handleSelectedRestrictedSpaceIdsChange = useCallback(
+    async (spaceIds: string[]) => {
+      const acceptedSpaceIds =
+        await onSelectedRestrictedSpaceIdsChange(spaceIds);
+      if (!acceptedSpaceIds) {
+        return;
+      }
+
+      saveCurrentDraftWithSelectedSpaces(acceptedSpaceIds);
+    },
+    [onSelectedRestrictedSpaceIdsChange, saveCurrentDraftWithSelectedSpaces]
+  );
+
+  const handleSelectedRestrictedSpaceIdsChangeSafely = useCallback(
+    (spaceIds: string[]) => {
+      void handleSelectedRestrictedSpaceIdsChange(spaceIds).catch((error) => {
+        sendNotification({
+          type: "error",
+          title: "Failed to update restricted Spaces",
+          description: normalizeError(error).message,
+        });
+      });
+    },
+    [handleSelectedRestrictedSpaceIdsChange, sendNotification]
+  );
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) {
@@ -805,11 +892,6 @@ const InputBarContainer = ({
     editor.setEditable(!disableInput);
   }, [editor, disableInput]);
 
-  // Ref to expose the current selectedSingleAgent to the editor update listener
-  // without re-registering it on every selection change.
-  const selectedSingleAgentRef = useRef(selectedSingleAgent);
-  selectedSingleAgentRef.current = selectedSingleAgent;
-
   // When a user mention is *newly added* in single-agent mode, deselect the agent
   // and clear side-channel capabilities. Only triggers on the transition from no-user-mention to
   // user-mention so that re-selecting an agent (via card click or URL param) isn't
@@ -847,7 +929,8 @@ const InputBarContainer = ({
     if (hasCompletedInitialContentRestoreRef.current) {
       saveDraftRef.current(
         editorIsEmpty ? "" : markdown,
-        selectedSingleAgentRef.current
+        selectedSingleAgentRef.current,
+        selectedRestrictedSpaceIdsRef.current
       );
     }
     const userMentioned = editorMentions.some((m) => m.type === "user");
@@ -1423,6 +1506,26 @@ const InputBarContainer = ({
                   />
                 </React.Fragment>
               ))}
+              {selectedRestrictedSpaces.map((selectedSpace) => (
+                <Chip
+                  key={selectedSpace.sId}
+                  size="xs"
+                  label={selectedSpace.name}
+                  icon={Lock01}
+                  className="m-0.5 bg-background text-foreground dark:bg-background-night dark:text-foreground-night"
+                  onRemove={
+                    conversation?.sId
+                      ? undefined
+                      : () => {
+                          handleSelectedRestrictedSpaceIdsChangeSafely(
+                            selectedRestrictedSpaceIds.filter(
+                              (spaceId) => spaceId !== selectedSpace.sId
+                            )
+                          );
+                        }
+                  }
+                />
+              ))}
             </div>
             <div className="relative flex w-full items-center justify-between">
               {!isRecording && editor && (
@@ -1492,6 +1595,22 @@ const InputBarContainer = ({
                         setOverlayOpen("attachments-picker", open)
                       }
                     />
+                    {shouldShowRestrictedSpacesAction && (
+                      <InputBarRestrictedSpacesPicker
+                        buttonSize={buttonSize}
+                        canDeselectSelectedSpaces={!conversation?.sId}
+                        disabled={disableInput}
+                        isLoading={isSelectableRestrictedSpacesLoading}
+                        onOpenChange={(open) =>
+                          setOverlayOpen("restricted-spaces-picker", open)
+                        }
+                        onSelectedSpaceIdsChange={
+                          handleSelectedRestrictedSpaceIdsChangeSafely
+                        }
+                        selectedSpaceIds={selectedRestrictedSpaceIds}
+                        spaces={selectableRestrictedSpaces}
+                      />
+                    )}
                   </div>
                 )}
                 <div className="grow" />
