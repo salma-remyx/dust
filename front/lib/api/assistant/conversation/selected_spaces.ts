@@ -1,12 +1,23 @@
+import {
+  buildAuditLogTarget,
+  emitAuditLogEvent,
+} from "@app/lib/api/audit/workos_audit";
+import type { AuditLogContext } from "@app/lib/api/workos/organization";
 import { type Authenticator, getFeatureFlags } from "@app/lib/auth";
+import type { ConversationSelectedSpaceOrigin } from "@app/lib/models/agent/conversation_selected_space";
+import { ConversationResource } from "@app/lib/resources/conversation_resource";
 import { ConversationSelectedSpaceResource } from "@app/lib/resources/conversation_selected_space_resource";
 import { SpaceResource } from "@app/lib/resources/space_resource";
+import { getResourceIdFromSId } from "@app/lib/resources/string_ids";
+import { withTransaction } from "@app/lib/utils/sql_utils";
 import type {
+  ConversationSelectedSpacesResponse,
   ConversationWithoutContentType,
   SelectableConversationSpaceType,
 } from "@app/types/assistant/conversation";
 import type { Result } from "@app/types/shared/result";
 import { Err, Ok } from "@app/types/shared/result";
+import { removeNulls } from "@app/types/shared/utils/general";
 import uniq from "lodash/uniq";
 import type { Transaction } from "sequelize";
 
@@ -19,7 +30,8 @@ export class SelectedConversationSpacesError extends Error {
       | "conversation_not_mutable"
       | "feature_flag_not_found"
       | "space_not_found"
-      | "space_not_restricted",
+      | "space_not_restricted"
+      | "space_not_selectable",
     message: string
   ) {
     super(message);
@@ -182,4 +194,134 @@ export async function validateSelectableRestrictedSpaces(
   }
 
   return new Ok(spaces);
+}
+
+export async function addSelectedConversationSpaces(
+  auth: Authenticator,
+  {
+    conversation,
+    spaceIds,
+    origin,
+    auditContext,
+    transaction,
+  }: {
+    conversation: ConversationWithoutContentType;
+    spaceIds: string[];
+    origin: ConversationSelectedSpaceOrigin;
+    auditContext?: AuditLogContext;
+    transaction?: Transaction;
+  }
+): Promise<
+  Result<ConversationSelectedSpacesResponse, SelectedConversationSpacesError>
+> {
+  const dedupedSpaceIds = dedupeSpaceIds(spaceIds);
+
+  if (dedupedSpaceIds.length === 0) {
+    const selectedSpaces = await listSelectedConversationSpaces(auth, {
+      conversation,
+      transaction,
+    });
+
+    return new Ok({
+      selectedSpaces: selectedSpaces.map((space) => ({
+        ...space.toJSON(),
+        selected: true,
+      })),
+      effectiveAcl: {
+        spaceIds: conversation.requestedSpaceIds,
+        viewerMustHaveAll: true as const,
+      },
+    });
+  }
+
+  let newlyActiveSpaces: SpaceResource[] = [];
+  const result = await withTransaction(async (t) => {
+    const validation = await assertCanUseSelectedSpaces(auth, {
+      conversation,
+      spaceIds: dedupedSpaceIds,
+      transaction: t,
+    });
+    if (validation.isErr()) {
+      return validation;
+    }
+
+    const spaces = validation.value;
+    const requestedSpaceModelIds = removeNulls(
+      conversation.requestedSpaceIds.map(getResourceIdFromSId)
+    );
+    const selectedSpaceModelIds = spaces.map((space) => space.id);
+    const effectiveAclSpaceModelIds = uniq([
+      ...requestedSpaceModelIds,
+      ...selectedSpaceModelIds,
+    ]);
+
+    const updateResult = await ConversationResource.updateRequirements(
+      auth,
+      conversation.sId,
+      effectiveAclSpaceModelIds,
+      t
+    );
+    if (updateResult.isErr()) {
+      return new Err(
+        new SelectedConversationSpacesError(
+          "space_not_selectable",
+          updateResult.error.message
+        )
+      );
+    }
+
+    const { createdSpaces, reactivatedSpaces } =
+      await ConversationSelectedSpaceResource.upsertForConversation(auth, {
+        conversation,
+        spaces,
+        origin,
+        transaction: t,
+      });
+    newlyActiveSpaces = [...createdSpaces, ...reactivatedSpaces];
+
+    const allSelectedSpaces = await listSelectedConversationSpaces(auth, {
+      conversation,
+      transaction: t,
+    });
+    const effectiveAclSpaceIds = uniq([
+      ...conversation.requestedSpaceIds,
+      ...spaces.map((space) => space.sId),
+    ]);
+
+    return new Ok({
+      selectedSpaces: allSelectedSpaces.map((space) => ({
+        ...space.toJSON(),
+        selected: true,
+      })),
+      effectiveAcl: {
+        spaceIds: effectiveAclSpaceIds,
+        viewerMustHaveAll: true as const,
+      },
+    });
+  }, transaction);
+
+  if (result.isOk()) {
+    for (const space of newlyActiveSpaces) {
+      void emitAuditLogEvent({
+        auth,
+        action: "conversation.restricted_space_selected",
+        targets: [
+          buildAuditLogTarget("workspace", auth.getNonNullableWorkspace()),
+          buildAuditLogTarget("conversation", {
+            sId: conversation.sId,
+            name: conversation.title ?? "",
+          }),
+          buildAuditLogTarget("space", space),
+        ],
+        context: auditContext,
+        metadata: {
+          conversation_id: conversation.sId,
+          space_id: space.sId,
+          origin,
+        },
+      });
+    }
+  }
+
+  return result;
 }

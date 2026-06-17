@@ -5,6 +5,7 @@ import {
   type ConversationAccessType,
   ConversationResource,
 } from "@app/lib/resources/conversation_resource";
+import { ConversationSelectedSpaceResource } from "@app/lib/resources/conversation_selected_space_resource";
 import { SpaceResource } from "@app/lib/resources/space_resource";
 import { getResourceIdFromSId } from "@app/lib/resources/string_ids";
 import type { LightAgentConfigurationType } from "@app/types/assistant/agent";
@@ -177,24 +178,41 @@ export async function updateConversationRequirements(
     t?: Transaction;
   }
 ): Promise<void> {
-  // !!! IMPORTANT !!!
-  // By design, project conversations are always visible to everyone that have READ permission to the project.
-  // Therefor we strip all the space requirements from the conversation.
-  // It means that we rely on agents and content fragments permissions checking to have happened before.
-  // It also means that if we "move" a conversation to a project, we need to update the conversation requirements and we make it visibel
   if (isPodConversation(conversation)) {
+    // Project conversations normally require only project READ access. Selected
+    // restricted Spaces are preserved because their content is materialized into
+    // the conversation ACL.
     const spaceModelId = getResourceIdFromSId(conversation.spaceId);
     if (spaceModelId === null) {
       throw new Error("Unexpected: invalid space sId in conversation.");
     }
+    const selectedSpaces =
+      await ConversationSelectedSpaceResource.listActiveSpacesByConversation(
+        auth,
+        {
+          conversation,
+          transaction: t,
+        }
+      );
+    const requestedSpaceModelIds = uniq([
+      spaceModelId,
+      ...selectedSpaces.map((space) => space.id),
+    ]);
+    const requestedSpaceIds = requestedSpaceModelIds.map((id) =>
+      SpaceResource.modelIdToSId({
+        id,
+        workspaceId: auth.getNonNullableWorkspace().id,
+      })
+    );
+    const currentSpaceIds = new Set(conversation.requestedSpaceIds);
     if (
-      conversation.requestedSpaceIds.length !== 1 ||
-      conversation.requestedSpaceIds[0] !== conversation.spaceId
+      conversation.requestedSpaceIds.length !== requestedSpaceIds.length ||
+      requestedSpaceIds.some((spaceId) => !currentSpaceIds.has(spaceId))
     ) {
       await ConversationResource.updateRequirements(
         auth,
         conversation.sId,
-        [spaceModelId],
+        requestedSpaceModelIds,
         t
       );
     }

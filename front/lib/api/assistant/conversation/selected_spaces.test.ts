@@ -1,4 +1,20 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { mockEmitAuditLogEvent } = vi.hoisted(() => ({
+  mockEmitAuditLogEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@app/lib/api/audit/workos_audit", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@app/lib/api/audit/workos_audit")>();
+
+  return { ...actual, emitAuditLogEvent: mockEmitAuditLogEvent };
+});
+
+import { getConversation } from "@app/lib/api/assistant/conversation/fetch";
+import { updateConversationRequirements } from "@app/lib/api/assistant/conversation/permissions";
 import {
+  addSelectedConversationSpaces,
   assertCanUseSelectedSpaces,
   listSelectableRestrictedSpaces,
   RESTRICTED_SPACES_IN_INPUT_BAR_FEATURE_FLAG,
@@ -14,7 +30,6 @@ import { createResourceTest } from "@app/tests/utils/generic_resource_tests";
 import { SpaceFactory } from "@app/tests/utils/SpaceFactory";
 import type { Result } from "@app/types/shared/result";
 import type { UserType, WorkspaceType } from "@app/types/user";
-import { beforeEach, describe, expect, it } from "vitest";
 
 function unwrapResult<T>(
   result: Result<T, SelectedConversationSpacesError>
@@ -47,6 +62,7 @@ describe("selected conversation Spaces", () => {
     globalSpace = setup.globalSpace;
     user = setup.user.toJSON();
     workspace = auth.getNonNullableWorkspace();
+    mockEmitAuditLogEvent.mockClear();
   });
 
   async function enableFeature() {
@@ -86,6 +102,15 @@ describe("selected conversation Spaces", () => {
       messagesCreatedAt: [],
       visibility: "unlisted",
     });
+  }
+
+  async function fetchConversation(conversationId: string) {
+    const result = await getConversation(auth, conversationId);
+    if (result.isErr()) {
+      throw result.error;
+    }
+
+    return result.value;
   }
 
   it("rejects selected Spaces when the feature flag is disabled", async () => {
@@ -174,6 +199,88 @@ describe("selected conversation Spaces", () => {
         spaceIds: [globalSpace.sId],
       }),
       "space_not_restricted"
+    );
+  });
+
+  it("materializes selected Spaces, dedupes input, and emits audit events", async () => {
+    await enableFeature();
+    const selectedSpace = await memberRestrictedSpace();
+    const conv = await conversation();
+
+    const result = unwrapResult(
+      await addSelectedConversationSpaces(auth, {
+        conversation: conv,
+        origin: "input_bar",
+        spaceIds: [selectedSpace.sId, selectedSpace.sId],
+      })
+    );
+
+    expect(result.selectedSpaces).toEqual([
+      expect.objectContaining({ sId: selectedSpace.sId, selected: true }),
+    ]);
+    expect(result.effectiveAcl.spaceIds).toContain(selectedSpace.sId);
+    expect(mockEmitAuditLogEvent).toHaveBeenCalledTimes(1);
+    expect(mockEmitAuditLogEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "conversation.restricted_space_selected",
+        metadata: {
+          conversation_id: conv.sId,
+          origin: "input_bar",
+          space_id: selectedSpace.sId,
+        },
+      })
+    );
+  });
+
+  it("does not persist selected Spaces when ACL materialization fails", async () => {
+    await enableFeature();
+    const selectedSpace = await memberRestrictedSpace();
+    const conv = await conversation();
+    const missingConversationId = `${conv.sId}_missing`;
+
+    expectErrCode(
+      await addSelectedConversationSpaces(auth, {
+        conversation: { ...conv, sId: missingConversationId },
+        origin: "input_bar",
+        spaceIds: [selectedSpace.sId],
+      }),
+      "space_not_selectable"
+    );
+    expect(
+      await ConversationSelectedSpaceResource.listActiveSpacesByConversation(
+        auth,
+        { conversation: conv }
+      )
+    ).toEqual([]);
+    expect(mockEmitAuditLogEvent).not.toHaveBeenCalled();
+  });
+
+  it("keeps selected Spaces when refreshing project requirements", async () => {
+    const selectedSpace = await memberRestrictedSpace();
+    const projectSpace = await SpaceFactory.project(workspace, user.id);
+    await addCurrentUser(projectSpace);
+    const projectConversation = await ConversationFactory.create(auth, {
+      agentConfigurationId: "test-agent",
+      messagesCreatedAt: [],
+      spaceId: projectSpace.id,
+      visibility: "unlisted",
+    });
+    await ConversationSelectedSpaceResource.upsertForConversation(auth, {
+      conversation: projectConversation,
+      origin: "pod_context",
+      spaces: [selectedSpace],
+    });
+
+    await updateConversationRequirements(auth, {
+      conversation: await fetchConversation(projectConversation.sId),
+    });
+
+    const updatedConversation = await fetchConversation(
+      projectConversation.sId
+    );
+    expect(updatedConversation.requestedSpaceIds).toHaveLength(2);
+    expect(updatedConversation.requestedSpaceIds).toEqual(
+      expect.arrayContaining([projectSpace.sId, selectedSpace.sId])
     );
   });
 });
