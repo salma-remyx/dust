@@ -257,6 +257,7 @@ The following skills are available for use with the skill_management__enable_ski
       visibility: "visible",
       configuration: agentConfig,
       skipToolsValidation: false,
+      costCredits: 1,
       actions: [
         {
           id: 1,
