@@ -258,7 +258,7 @@ export const GMAIL_TOOLS_METADATA = createToolsRecord({
     stake: "high",
     editable: {
       isEditable: true,
-      editableArguments: ["subject"] as const,
+      editableArguments: ["subject"],
     },
     displayLabels: {
       running: "Sending Gmail email",
@@ -302,14 +302,7 @@ export const GMAIL_SERVER = {
     description: t.description,
     inputSchema: zodToJsonSchema(z.object(t.schema)) as JSONSchema,
     displayLabels: t.displayLabels,
-    ...("editable" in t
-      ? {
-          editable: {
-            ...t.editable,
-            editableArguments: [...t.editable.editableArguments],
-          },
-        }
-      : {}),
+    editable: t.editable,
   })),
   tools_stakes: Object.fromEntries(
     Object.values(GMAIL_TOOLS_METADATA).map((t) => [t.name, t.stake])

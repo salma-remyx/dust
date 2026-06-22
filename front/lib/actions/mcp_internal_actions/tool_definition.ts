@@ -41,13 +41,6 @@ export type ClientToolHandlers<
   ) => Promise<ToolHandlerResult>;
 };
 
-type EditableToolConfig<TSchema extends ZodRawShape> = {
-  isEditable: boolean;
-  editableArguments: ReadonlyArray<
-    Extract<keyof z.infer<z.ZodObject<TSchema>>, string>
-  >;
-};
-
 export interface ToolDefinition<
   TName extends string = string,
   TSchema extends ZodRawShape = ZodRawShape,
@@ -58,7 +51,12 @@ export interface ToolDefinition<
   schema: TSchema;
   stake: MCPToolStakeLevelType;
   displayLabels: ToolDisplayLabels;
-  editable?: EditableToolConfig<TSchema>;
+  editable?: {
+    isEditable: boolean;
+    editableArguments: Array<
+      Extract<keyof z.infer<z.ZodObject<TSchema>>, string>
+    >;
+  };
   handler: (
     params: z.infer<z.ZodObject<TSchema>>,
     extra: ToolHandlerExtra
