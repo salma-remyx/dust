@@ -1,0 +1,25 @@
+src/components/Profile.tsx(630,17): error TS2322: Type 'ToolRow[]' is not assignable to type 'TBaseData[]'.
+  Type 'ToolRow' has no properties in common with type 'TBaseData'.
+src/components/Profile.tsx(631,17): error TS2322: Type 'ColumnDef<ToolRow>[]' is not assignable to type 'ColumnDef<TBaseData, any>[]'.
+  Type 'ColumnDef<ToolRow>' is not assignable to type 'ColumnDef<TBaseData, any>'.
+    Type 'ColumnDefBase<ToolRow, unknown> & StringHeaderIdentifier' is not assignable to type 'ColumnDef<TBaseData, any>'.
+      Type 'ColumnDefBase<ToolRow, unknown> & StringHeaderIdentifier' is not assignable to type 'AccessorFnColumnDefBase<TBaseData, any> & IdIdentifier<TBaseData, any>'.
+        Property 'accessorFn' is missing in type 'ColumnDefBase<ToolRow, unknown> & StringHeaderIdentifier' but required in type 'AccessorFnColumnDefBase<TBaseData, any>'.
+src/components/Profile.tsx(653,17): error TS2322: Type 'TriggerRow[]' is not assignable to type 'TBaseData[]'.
+  Type 'TriggerRow' has no properties in common with type 'TBaseData'.
+src/components/Profile.tsx(654,17): error TS2322: Type 'ColumnDef<TriggerRow>[]' is not assignable to type 'ColumnDef<TBaseData, any>[]'.
+  Type 'ColumnDef<TriggerRow>' is not assignable to type 'ColumnDef<TBaseData, any>'.
+    Type 'ColumnDefBase<TriggerRow, unknown> & StringHeaderIdentifier' is not assignable to type 'ColumnDef<TBaseData, any>'.
+      Type 'ColumnDefBase<TriggerRow, unknown> & StringHeaderIdentifier' is not assignable to type 'AccessorFnColumnDefBase<TBaseData, any> & IdIdentifier<TBaseData, any>'.
+        Property 'accessorFn' is missing in type 'ColumnDefBase<TriggerRow, unknown> & StringHeaderIdentifier' but required in type 'AccessorFnColumnDefBase<TBaseData, any>'.
+src/components/RichTextArea.tsx(458,3): error TS2353: Object literal may only specify known properties, and 'char' does not exist in type 'Partial<MentionOptions<any, MentionNodeAttrs>>'.
+src/components/RichTextArea.tsx(754,26): error TS2345: Argument of type '{ type: string; content: { type: string; text?: string; marks?: unknown[]; }[]; }' is not assignable to parameter of type 'Node | Content | Fragment'.
+  Types of property 'content' are incompatible.
+    Type '{ type: string; text?: string; marks?: unknown[]; }[]' is not assignable to type 'Fragment | JSONContent[] | readonly Node[]'.
+      Type '{ type: string; text?: string; marks?: unknown[]; }[]' is not assignable to type 'JSONContent[]'.
+        Type '{ type: string; text?: string; marks?: unknown[]; }' is not assignable to type 'JSONContent'.
+          Types of property 'marks' are incompatible.
+            Type 'unknown[]' is not assignable to type '{ [key: string]: any; type: string; attrs?: Record<string, any>; }[]'.
+              Property 'type' is missing in type '{}' but required in type '{ [key: string]: any; type: string; attrs?: Record<string, any>; }'.
+../src/components/markdown/ContentBlockWrapper.tsx(113,12): error TS2550: Property 'replaceAll' does not exist on type 'string'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2021' or later.
+../src/lib/safeLazy.ts(10,20): error TS2554: Expected 0-1 arguments, but got 2.

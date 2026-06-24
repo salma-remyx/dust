@@ -46,6 +46,7 @@ import {
   NewConversationUserMessage,
 } from "./NewConversationMessages";
 import { NewCitation } from "./NewCitation";
+import type { Components } from "react-markdown";
 import {
   type ReactNode,
   useCallback,
@@ -54,6 +55,14 @@ import {
   useRef,
   useState,
 } from "react";
+
+import {
+  FileChip,
+  FileInsertProvider,
+  type FileInsertTarget,
+  type FileInsertType,
+} from "./InlineFileChip";
+import { fileChipDirective } from "./fileChipDirective";
 
 import { getAgentById } from "../data/agents";
 import type {
@@ -71,6 +80,26 @@ import type {
 import { getUserById } from "../data/users";
 import { InputBar } from "./InputBar";
 import { SuggestionBox } from "./SuggestionBox";
+
+// Map an inline file insert type onto the citation icon vocabulary so file
+// chips reuse the same preview sheet as citations.
+function fileInsertTypeToCitationIcon(
+  fileType: FileInsertType
+): MessageCitationData["icon"] {
+  switch (fileType) {
+    case "xlsx":
+    case "csv":
+      return "table";
+    case "image":
+      return "image";
+    case "slack":
+      return "slack";
+    case "notion":
+      return "notion";
+    default:
+      return "document";
+  }
+}
 
 interface ConversationViewProps {
   conversation: Conversation;
@@ -461,6 +490,30 @@ export function ConversationView({
     },
   });
 
+  // Inline file inserts inside message markdown (the `:file[...]` directive).
+  const fileChipComponents = useMemo(
+    () => ({ file_chip: FileChip }) as Components,
+    []
+  );
+  const fileChipPlugins = useMemo(() => [fileChipDirective], []);
+
+  const openFileInsert = useCallback(
+    (file: FileInsertTarget) => {
+      const icon = fileInsertTypeToCitationIcon(file.fileType);
+      if (onCitationOpen) {
+        onCitationOpen({ title: file.title, icon });
+        return;
+      }
+      setSelectedCitation({
+        id: file.id ?? `file-${file.title}`,
+        title: file.title,
+        icon,
+      });
+      setIsCitationSheetOpen(true);
+    },
+    [onCitationOpen]
+  );
+
   const getCitationIcon = (
     icon?: "table" | "document" | "slack" | "notion" | "image"
   ) => {
@@ -488,7 +541,12 @@ export function ConversationView({
 
     if (message.markdown) {
       blocks.push(
-        <Markdown key={`${message.id}-markdown`} content={message.markdown} />
+        <Markdown
+          key={`${message.id}-markdown`}
+          content={message.markdown}
+          additionalMarkdownComponents={fileChipComponents}
+          additionalMarkdownPlugins={fileChipPlugins}
+        />
       );
     }
 
@@ -894,294 +952,299 @@ export function ConversationView({
       : undefined;
 
   return (
-    <div className="s-flex s-h-full s-w-full s-flex-col s-overflow-hidden">
-      <Dialog
-        open={isRenameDialogOpen}
-        onOpenChange={(open: boolean) => {
-          if (!open) {
-            setIsRenameDialogOpen(false);
-          }
-        }}
-      >
-        <DialogContent size="md">
-          <DialogHeader>
-            <DialogTitle>Rename conversation</DialogTitle>
-          </DialogHeader>
-          <DialogContainer>
-            <Input
-              value={pendingTitle}
-              onChange={(event) => setPendingTitle(event.target.value)}
-              placeholder="Conversation title"
-            />
-          </DialogContainer>
-          <DialogFooter
-            leftButtonProps={{
-              label: "Cancel",
-              variant: "outline",
-              onClick: () => setIsRenameDialogOpen(false),
-            }}
-            rightButtonProps={{
-              label: "Save",
-              variant: "highlight",
-              onClick: () => {
-                const trimmedTitle = pendingTitle.trim();
-                if (trimmedTitle) {
-                  setDisplayTitle(trimmedTitle);
-                }
-                setIsRenameDialogOpen(false);
-              },
-            }}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* Messages container - scrollable */}
-      <div className="s-relative s-flex s-flex-1 s-flex-col s-overflow-hidden">
-        <div
-          ref={scrollContainerRef}
-          className="s-flex s-min-h-0 s-flex-1 s-flex-col s-overflow-y-auto"
-        >
-          <NewConversationContainer>
-            <div ref={messagesEndRef} className="s-h-12 s-shrink-0" />
-            {conversationBlocks}
-            <div ref={messagesEndRef} className="s-h-32 s-shrink-0" />
-          </NewConversationContainer>
-        </div>
-        <div className="s-pointer-events-none s-absolute s-bottom-4 s-left-0 s-right-0 s-flex s-justify-center">
-          <div className="s-pointer-events-auto s-w-full s-max-w-4xl s-px-4">
-            <InputBar
-              className="s-shadow-xl"
-              onSend={validationDisplayMode === "sheet" ? onSend : undefined}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Image citation zoom dialog */}
-      {selectedCitation?.imgSrc && (
-        <ImageZoomDialog
-          open={isImageZoomOpen}
-          onOpenChange={(open) => {
-            setIsImageZoomOpen(open);
-            if (!open) setSelectedCitation(null);
-          }}
-          image={{
-            src: selectedCitation.imgSrc,
-            title: selectedCitation.title,
-          }}
-        />
-      )}
-
-      {/* Citation Preview Sheet */}
-      <Sheet
-        open={isCitationSheetOpen}
-        onOpenChange={(open: boolean) => {
-          setIsCitationSheetOpen(open);
-          if (!open) {
-            setSelectedCitation(null);
-            setDocumentView("preview");
-          }
-        }}
-      >
-        <SheetContent size="3xl" side="right">
-          <SheetHeader>
-            <SheetTitle>
-              <div className="s-flex s-flex-1 s-flex-col s-w-full s-items-start s-gap-4">
-                <div className="s-flex s-items-center s-gap-2">
-                  {selectedCitation && (
-                    <Icon
-                      visual={getCitationIcon(selectedCitation.icon)}
-                      size="md"
-                    />
-                  )}
-                  <span>{selectedCitation?.title || "Document View"}</span>
-                </div>
-                <div className="s-flex s-w-full s-items-center s-gap-2">
-                  <ButtonsSwitchList
-                    defaultValue="preview"
-                    size="xs"
-                    onValueChange={(value) => {
-                      if (value === "preview" || value === "extracted") {
-                        setDocumentView(value);
-                      }
-                    }}
-                  >
-                    <ButtonsSwitch value="preview" label="Preview" />
-                    <ButtonsSwitch
-                      value="extracted"
-                      label="Extracted information"
-                    />
-                  </ButtonsSwitchList>
-                  <div className="s-flex-1" />
-                  <div className="s-flex s-items-center s-gap-2">
-                    <Button
-                      variant="outline"
-                      size="icon-xs"
-                      icon={Download01}
-                      tooltip="Download"
-                    />
-                    <Button
-                      variant="outline"
-                      size="icon-xs"
-                      icon={LinkExternal01}
-                      tooltip="Open in tab"
-                    />
-                  </div>
-                </div>
-              </div>
-            </SheetTitle>
-          </SheetHeader>
-          <SheetContainer>
-            <div className="s-flex s-flex-col s-items-center s-justify-center s-py-16">
-              <p className="s-text-foreground dark:s-text-foreground-night">
-                {documentView === "preview"
-                  ? "Document Preview"
-                  : "Extracted information"}
-              </p>
-            </div>
-          </SheetContainer>
-        </SheetContent>
-      </Sheet>
-
-      {/* Validation Sheet (when validationDisplayMode === "sheet") */}
-      {validationDisplayMode === "sheet" && pendingValidationBlock && (
-        <Sheet
-          open={!!pendingValidationBlock}
-          onOpenChange={(open) => {
-            if (!open && pendingValidationBlock) {
-              onCancelPendingValidation?.(pendingValidationBlock.id);
+    <FileInsertProvider openFile={openFileInsert}>
+      <div className="s-flex s-h-full s-w-full s-flex-col s-overflow-hidden">
+        <Dialog
+          open={isRenameDialogOpen}
+          onOpenChange={(open: boolean) => {
+            if (!open) {
+              setIsRenameDialogOpen(false);
             }
           }}
         >
-          <SheetContent size="xl" side="right">
-            <SheetHeader hideButton>
-              <SheetTitle>@StrategyPlanner</SheetTitle>
-              <SheetDescription>
-                This agent has access to sensitive data. Review the Agent's
-                message before publishing in the conversation.
-              </SheetDescription>
-            </SheetHeader>
-            <SheetContainer>
-              <div className="s-flex s-flex-col s-gap-4">
-                <NewConversationMessageGroup
-                  type="locutor"
-                  timestamp={pendingValidationBlock.userMessage.group.timestamp}
-                >
-                  <NewConversationUserMessage
-                    hideActions
-                    isLastMessage
-                    citations={pendingValidationBlock.userMessage.citations?.map(
-                      (citation) => (
-                        <NewCitation
-                          key={citation.id}
-                          visual={getCitationIcon(citation.icon)}
-                          label={citation.title}
-                          size="lg"
-                          onClick={() => {
-                            setSelectedCitation(citation);
-                            if (citation.imgSrc) {
-                              setIsImageZoomOpen(true);
-                            } else {
-                              setIsCitationSheetOpen(true);
-                            }
-                          }}
-                          {...(citation.imgSrc
-                            ? { imgSrc: citation.imgSrc }
-                            : {})}
-                        />
-                      )
-                    )}
-                  >
-                    {renderMessageBody(pendingValidationBlock.userMessage)}
-                  </NewConversationUserMessage>
-                </NewConversationMessageGroup>
-                <NewConversationMessageGroup
-                  type="agent"
-                  avatar={(() => {
-                    const agent = getAgentByOwnerId(
-                      pendingValidationBlock.agentMessage.ownerId
-                    );
-                    return agent
-                      ? {
-                          emoji: agent.emoji,
-                          backgroundColor: agent.backgroundColor,
-                          name: agent.name,
-                        }
-                      : pendingValidationBlock.agentMessage.group.avatar
-                        ? {
-                            ...pendingValidationBlock.agentMessage.group.avatar,
-                            name: pendingValidationBlock.agentMessage.group
-                              .name,
-                          }
-                        : undefined;
-                  })()}
-                  name={
-                    getAgentByOwnerId(
-                      pendingValidationBlock.agentMessage.ownerId
-                    )?.name ?? pendingValidationBlock.agentMessage.group.name
-                  }
-                  timestamp={
-                    pendingValidationBlock.agentMessage.group.timestamp
-                  }
-                  completionStatus={
-                    pendingValidationBlock.agentMessage.group
-                      .completionStatus ? (
-                      <span className="s-text-xs s-text-muted-foreground dark:s-text-muted-foreground-night">
-                        {
-                          pendingValidationBlock.agentMessage.group
-                            .completionStatus
-                        }
-                      </span>
-                    ) : undefined
-                  }
-                >
-                  <NewConversationAgentMessage
-                    hideActions
-                    isLastMessage
-                    citations={pendingValidationBlock.agentMessage.citations?.map(
-                      (citation) => (
-                        <NewCitation
-                          key={citation.id}
-                          visual={getCitationIcon(citation.icon)}
-                          label={citation.title}
-                          size="lg"
-                          onClick={() => {
-                            setSelectedCitation(citation);
-                            if (citation.imgSrc) {
-                              setIsImageZoomOpen(true);
-                            } else {
-                              setIsCitationSheetOpen(true);
-                            }
-                          }}
-                          {...(citation.imgSrc
-                            ? { imgSrc: citation.imgSrc }
-                            : {})}
-                        />
-                      )
-                    )}
-                  >
-                    {renderMessageBody(pendingValidationBlock.agentMessage)}
-                  </NewConversationAgentMessage>
-                </NewConversationMessageGroup>
-              </div>
-            </SheetContainer>
-            <SheetFooter
+          <DialogContent size="md">
+            <DialogHeader>
+              <DialogTitle>Rename conversation</DialogTitle>
+            </DialogHeader>
+            <DialogContainer>
+              <Input
+                value={pendingTitle}
+                onChange={(event) => setPendingTitle(event.target.value)}
+                placeholder="Conversation title"
+              />
+            </DialogContainer>
+            <DialogFooter
               leftButtonProps={{
-                label: "Reject",
+                label: "Cancel",
                 variant: "outline",
-                onClick: () =>
-                  onCancelPendingValidation?.(pendingValidationBlock.id),
+                onClick: () => setIsRenameDialogOpen(false),
               }}
               rightButtonProps={{
-                label: "Publish in conversation",
+                label: "Save",
                 variant: "highlight",
-                onClick: () =>
-                  onAcceptPendingValidation?.(pendingValidationBlock.id),
+                onClick: () => {
+                  const trimmedTitle = pendingTitle.trim();
+                  if (trimmedTitle) {
+                    setDisplayTitle(trimmedTitle);
+                  }
+                  setIsRenameDialogOpen(false);
+                },
               }}
             />
+          </DialogContent>
+        </Dialog>
+
+        {/* Messages container - scrollable */}
+        <div className="s-relative s-flex s-flex-1 s-flex-col s-overflow-hidden">
+          <div
+            ref={scrollContainerRef}
+            className="s-flex s-min-h-0 s-flex-1 s-flex-col s-overflow-y-auto"
+          >
+            <NewConversationContainer>
+              <div ref={messagesEndRef} className="s-h-12 s-shrink-0" />
+              {conversationBlocks}
+              <div ref={messagesEndRef} className="s-h-32 s-shrink-0" />
+            </NewConversationContainer>
+          </div>
+          <div className="s-pointer-events-none s-absolute s-bottom-4 s-left-0 s-right-0 s-flex s-justify-center">
+            <div className="s-pointer-events-auto s-w-full s-max-w-4xl s-px-4">
+              <InputBar
+                className="s-shadow-xl"
+                onSend={validationDisplayMode === "sheet" ? onSend : undefined}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Image citation zoom dialog */}
+        {selectedCitation?.imgSrc && (
+          <ImageZoomDialog
+            open={isImageZoomOpen}
+            onOpenChange={(open) => {
+              setIsImageZoomOpen(open);
+              if (!open) setSelectedCitation(null);
+            }}
+            image={{
+              src: selectedCitation.imgSrc,
+              title: selectedCitation.title,
+            }}
+          />
+        )}
+
+        {/* Citation Preview Sheet */}
+        <Sheet
+          open={isCitationSheetOpen}
+          onOpenChange={(open: boolean) => {
+            setIsCitationSheetOpen(open);
+            if (!open) {
+              setSelectedCitation(null);
+              setDocumentView("preview");
+            }
+          }}
+        >
+          <SheetContent size="3xl" side="right">
+            <SheetHeader>
+              <SheetTitle>
+                <div className="s-flex s-flex-1 s-flex-col s-w-full s-items-start s-gap-4">
+                  <div className="s-flex s-items-center s-gap-2">
+                    {selectedCitation && (
+                      <Icon
+                        visual={getCitationIcon(selectedCitation.icon)}
+                        size="md"
+                      />
+                    )}
+                    <span>{selectedCitation?.title || "Document View"}</span>
+                  </div>
+                  <div className="s-flex s-w-full s-items-center s-gap-2">
+                    <ButtonsSwitchList
+                      defaultValue="preview"
+                      size="xs"
+                      onValueChange={(value) => {
+                        if (value === "preview" || value === "extracted") {
+                          setDocumentView(value);
+                        }
+                      }}
+                    >
+                      <ButtonsSwitch value="preview" label="Preview" />
+                      <ButtonsSwitch
+                        value="extracted"
+                        label="Extracted information"
+                      />
+                    </ButtonsSwitchList>
+                    <div className="s-flex-1" />
+                    <div className="s-flex s-items-center s-gap-2">
+                      <Button
+                        variant="outline"
+                        size="icon-xs"
+                        icon={Download01}
+                        tooltip="Download"
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon-xs"
+                        icon={LinkExternal01}
+                        tooltip="Open in tab"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </SheetTitle>
+            </SheetHeader>
+            <SheetContainer>
+              <div className="s-flex s-flex-col s-items-center s-justify-center s-py-16">
+                <p className="s-text-foreground dark:s-text-foreground-night">
+                  {documentView === "preview"
+                    ? "Document Preview"
+                    : "Extracted information"}
+                </p>
+              </div>
+            </SheetContainer>
           </SheetContent>
         </Sheet>
-      )}
-    </div>
+
+        {/* Validation Sheet (when validationDisplayMode === "sheet") */}
+        {validationDisplayMode === "sheet" && pendingValidationBlock && (
+          <Sheet
+            open={!!pendingValidationBlock}
+            onOpenChange={(open) => {
+              if (!open && pendingValidationBlock) {
+                onCancelPendingValidation?.(pendingValidationBlock.id);
+              }
+            }}
+          >
+            <SheetContent size="xl" side="right">
+              <SheetHeader hideButton>
+                <SheetTitle>@StrategyPlanner</SheetTitle>
+                <SheetDescription>
+                  This agent has access to sensitive data. Review the Agent's
+                  message before publishing in the conversation.
+                </SheetDescription>
+              </SheetHeader>
+              <SheetContainer>
+                <div className="s-flex s-flex-col s-gap-4">
+                  <NewConversationMessageGroup
+                    type="locutor"
+                    timestamp={
+                      pendingValidationBlock.userMessage.group.timestamp
+                    }
+                  >
+                    <NewConversationUserMessage
+                      hideActions
+                      isLastMessage
+                      citations={pendingValidationBlock.userMessage.citations?.map(
+                        (citation) => (
+                          <NewCitation
+                            key={citation.id}
+                            visual={getCitationIcon(citation.icon)}
+                            label={citation.title}
+                            size="lg"
+                            onClick={() => {
+                              setSelectedCitation(citation);
+                              if (citation.imgSrc) {
+                                setIsImageZoomOpen(true);
+                              } else {
+                                setIsCitationSheetOpen(true);
+                              }
+                            }}
+                            {...(citation.imgSrc
+                              ? { imgSrc: citation.imgSrc }
+                              : {})}
+                          />
+                        )
+                      )}
+                    >
+                      {renderMessageBody(pendingValidationBlock.userMessage)}
+                    </NewConversationUserMessage>
+                  </NewConversationMessageGroup>
+                  <NewConversationMessageGroup
+                    type="agent"
+                    avatar={(() => {
+                      const agent = getAgentByOwnerId(
+                        pendingValidationBlock.agentMessage.ownerId
+                      );
+                      return agent
+                        ? {
+                            emoji: agent.emoji,
+                            backgroundColor: agent.backgroundColor,
+                            name: agent.name,
+                          }
+                        : pendingValidationBlock.agentMessage.group.avatar
+                          ? {
+                              ...pendingValidationBlock.agentMessage.group
+                                .avatar,
+                              name: pendingValidationBlock.agentMessage.group
+                                .name,
+                            }
+                          : undefined;
+                    })()}
+                    name={
+                      getAgentByOwnerId(
+                        pendingValidationBlock.agentMessage.ownerId
+                      )?.name ?? pendingValidationBlock.agentMessage.group.name
+                    }
+                    timestamp={
+                      pendingValidationBlock.agentMessage.group.timestamp
+                    }
+                    completionStatus={
+                      pendingValidationBlock.agentMessage.group
+                        .completionStatus ? (
+                        <span className="s-text-xs s-text-muted-foreground dark:s-text-muted-foreground-night">
+                          {
+                            pendingValidationBlock.agentMessage.group
+                              .completionStatus
+                          }
+                        </span>
+                      ) : undefined
+                    }
+                  >
+                    <NewConversationAgentMessage
+                      hideActions
+                      isLastMessage
+                      citations={pendingValidationBlock.agentMessage.citations?.map(
+                        (citation) => (
+                          <NewCitation
+                            key={citation.id}
+                            visual={getCitationIcon(citation.icon)}
+                            label={citation.title}
+                            size="lg"
+                            onClick={() => {
+                              setSelectedCitation(citation);
+                              if (citation.imgSrc) {
+                                setIsImageZoomOpen(true);
+                              } else {
+                                setIsCitationSheetOpen(true);
+                              }
+                            }}
+                            {...(citation.imgSrc
+                              ? { imgSrc: citation.imgSrc }
+                              : {})}
+                          />
+                        )
+                      )}
+                    >
+                      {renderMessageBody(pendingValidationBlock.agentMessage)}
+                    </NewConversationAgentMessage>
+                  </NewConversationMessageGroup>
+                </div>
+              </SheetContainer>
+              <SheetFooter
+                leftButtonProps={{
+                  label: "Reject",
+                  variant: "outline",
+                  onClick: () =>
+                    onCancelPendingValidation?.(pendingValidationBlock.id),
+                }}
+                rightButtonProps={{
+                  label: "Publish in conversation",
+                  variant: "highlight",
+                  onClick: () =>
+                    onAcceptPendingValidation?.(pendingValidationBlock.id),
+                }}
+              />
+            </SheetContent>
+          </Sheet>
+        )}
+      </div>
+    </FileInsertProvider>
   );
 }

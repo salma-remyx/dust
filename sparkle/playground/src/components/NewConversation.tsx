@@ -1,8 +1,11 @@
 import {
+  ArrowRight,
   Avatar,
+  BookOpen01,
   Button,
   Card,
   Chip,
+  Code02,
   Cube01,
   CubeOutline,
   DropdownMenu,
@@ -16,17 +19,32 @@ import {
   File01,
   FilterLines,
   Globe01,
+  GraduationHat01,
   Image01,
+  Laptop01,
+  LifeBuoy01,
   MessageChatSquare,
+  Phone01,
   Plus,
   SearchInput,
   Settings01,
+  Stars02,
   Table,
   Terminal,
   Tooltip,
   Translate01,
   User03,
+  Users01,
 } from "@dust-tt/sparkle";
+import {
+  ChromeLogo,
+  DriveLogo,
+  GithubLogo,
+  IntercomLogo,
+  LinearLogo,
+  NotionLogo,
+  SlackLogo,
+} from "@dust-tt/sparkle/logo/platforms";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 
 import { mockAgents, mockUsers } from "../data";
@@ -42,6 +60,7 @@ export type WelcomeAgentTab =
   | "favorites"
   | "discover"
   | "my_agents"
+  | "about_dust"
   | "browse"
   | "category";
 
@@ -210,6 +229,180 @@ function getCategoryTitle(categoryId: string): string {
   return CATEGORIES.find((c) => c.id === categoryId)?.title ?? "Category";
 }
 
+// ── About Dust tab ──────────────────────────────────────────────────────────
+// A static, document-style tab modeled after product "download / do more"
+// pages: get the apps, connect your tools, build with the API, and find help.
+// Items use either a Sparkle icon (rendered in a highlight-tinted avatar) or a
+// brand logo (rendered as-is to preserve its colors).
+
+type AboutDustItem = {
+  id: string;
+  name: string;
+  description: string;
+  action: string;
+  icon?: ComponentType<{ className?: string }>;
+  logo?: ComponentType<{ className?: string }>;
+};
+
+type AboutDustSection = {
+  id: string;
+  title: string;
+  description?: string;
+  layout: "feature" | "compact";
+  items: AboutDustItem[];
+};
+
+const ABOUT_DUST_SECTIONS: AboutDustSection[] = [
+  {
+    id: "apps",
+    title: "Get Dust everywhere",
+    description: "Bring Dust to your desktop, your phone, and your browser.",
+    layout: "feature",
+    items: [
+      {
+        id: "desktop",
+        name: "Desktop app",
+        description:
+          "Quick access from anywhere on your machine. Works with your local files and apps.",
+        action: "Download for macOS",
+        icon: Laptop01,
+      },
+      {
+        id: "mobile",
+        name: "Mobile app",
+        description:
+          "Take Dust anywhere. Start conversations and pick up tasks on the go.",
+        action: "Get the app",
+        icon: Phone01,
+      },
+      {
+        id: "extension",
+        name: "Browser extension",
+        description:
+          "Bring Dust into any tab to summarize, draft, and search as you browse.",
+        action: "Add to Chrome",
+        logo: ChromeLogo,
+      },
+    ],
+  },
+  {
+    id: "connectors",
+    title: "Connect your tools",
+    description: "Let Dust work with the data and apps your team already uses.",
+    layout: "compact",
+    items: [
+      {
+        id: "slack",
+        name: "Slack",
+        description: "Chat with Dust and sync conversations.",
+        action: "Connect",
+        logo: SlackLogo,
+      },
+      {
+        id: "notion",
+        name: "Notion",
+        description: "Search and reason over your workspace.",
+        action: "Connect",
+        logo: NotionLogo,
+      },
+      {
+        id: "drive",
+        name: "Google Drive",
+        description: "Bring in docs, sheets, and slides.",
+        action: "Connect",
+        logo: DriveLogo,
+      },
+      {
+        id: "github",
+        name: "GitHub",
+        description: "Give Dust context on your codebase.",
+        action: "Connect",
+        logo: GithubLogo,
+      },
+      {
+        id: "linear",
+        name: "Linear",
+        description: "Track issues and project status.",
+        action: "Connect",
+        logo: LinearLogo,
+      },
+      {
+        id: "intercom",
+        name: "Intercom",
+        description: "Ground answers in support history.",
+        action: "Connect",
+        logo: IntercomLogo,
+      },
+    ],
+  },
+  {
+    id: "build",
+    title: "Build with Dust",
+    description: "Automate and extend Dust from your own tools.",
+    layout: "feature",
+    items: [
+      {
+        id: "api",
+        name: "API & SDK",
+        description:
+          "Call agents and run workflows programmatically from your stack.",
+        action: "Read the docs",
+        icon: Code02,
+      },
+      {
+        id: "docs",
+        name: "Documentation",
+        description: "Guides, references, and best practices to go further.",
+        action: "Browse docs",
+        icon: BookOpen01,
+      },
+      {
+        id: "cli",
+        name: "Dust CLI",
+        description:
+          "Manage spaces, agents, and data sources from the terminal.",
+        action: "Install CLI",
+        icon: Terminal,
+      },
+    ],
+  },
+  {
+    id: "resources",
+    title: "Learn & get help",
+    layout: "compact",
+    items: [
+      {
+        id: "help",
+        name: "Help center",
+        description: "Setup guides and troubleshooting.",
+        action: "Open",
+        icon: LifeBuoy01,
+      },
+      {
+        id: "academy",
+        name: "Dust Academy",
+        description: "Courses to master agents and skills.",
+        action: "Open",
+        icon: GraduationHat01,
+      },
+      {
+        id: "community",
+        name: "Community",
+        description: "Share workflows and ask questions.",
+        action: "Open",
+        icon: Users01,
+      },
+      {
+        id: "whats-new",
+        name: "What's new",
+        description: "Latest features and updates.",
+        action: "Open",
+        icon: Stars02,
+      },
+    ],
+  },
+];
+
 // The tab switch + Create / Manage buttons. Rendered both in-content and,
 // when scrolled out of view, in the panel topbar.
 export function NewConversationActionBar({
@@ -257,6 +450,10 @@ export function NewConversationActionBar({
     ],
   };
 
+  // Type/order filtering only makes sense while browsing agents and skills,
+  // not on the static "About Dust" tab.
+  const isAgentTab = value !== "about_dust";
+
   return (
     <div className="s-flex s-w-full s-items-center s-gap-2">
       <FreeButtonSwitch<WelcomeAgentTab>
@@ -266,36 +463,43 @@ export function NewConversationActionBar({
           { value: "favorites", label: "Favorites" },
           { value: "discover", label: "Discover" },
           { value: "my_agents", label: "Mine" },
+          { value: "about_dust", label: "More with Dust" },
           ...(value === "discover" ? [categoryOption] : []),
-          {
-            value: "browse",
-            pinned: "end",
-            icon: FilterLines,
-            tooltip: "Type and order",
-            dropdownSections: [
-              {
-                label: "Type",
-                kind: "radio",
-                value: agentType,
-                onValueChange: (v) => onAgentTypeChange(v as AgentType),
-                items: [
-                  { value: "all", label: AGENT_TYPE_LABELS.all },
-                  { value: "agents", label: AGENT_TYPE_LABELS.agents },
-                  { value: "skills", label: AGENT_TYPE_LABELS.skills },
-                ],
-              },
-              {
-                label: "Order",
-                kind: "radio",
-                value: agentSort,
-                onValueChange: (v) => onAgentSortChange(v as AgentSort),
-                items: getOrderOptionsForTab(value).map((sort) => ({
-                  value: sort,
-                  label: AGENT_SORT_LABELS[sort],
-                })),
-              },
-            ],
-          },
+          ...(isAgentTab
+            ? [
+                {
+                  value: "browse" as WelcomeAgentTab,
+                  pinned: "end" as const,
+                  icon: FilterLines,
+                  tooltip: "Type and order",
+                  dropdownSections: [
+                    {
+                      label: "Type",
+                      kind: "radio" as const,
+                      value: agentType,
+                      onValueChange: (v: string) =>
+                        onAgentTypeChange(v as AgentType),
+                      items: [
+                        { value: "all", label: AGENT_TYPE_LABELS.all },
+                        { value: "agents", label: AGENT_TYPE_LABELS.agents },
+                        { value: "skills", label: AGENT_TYPE_LABELS.skills },
+                      ],
+                    },
+                    {
+                      label: "Order",
+                      kind: "radio" as const,
+                      value: agentSort,
+                      onValueChange: (v: string) =>
+                        onAgentSortChange(v as AgentSort),
+                      items: getOrderOptionsForTab(value).map((sort) => ({
+                        value: sort,
+                        label: AGENT_SORT_LABELS[sort],
+                      })),
+                    },
+                  ],
+                },
+              ]
+            : []),
         ]}
       />
       <DropdownMenu>
@@ -628,6 +832,99 @@ export function NewConversation({
     );
   };
 
+  // Visual for an About Dust item: brand logos keep their own colors inside a
+  // bordered tile; Sparkle icons use a highlight-tinted avatar (like skills).
+  const renderAboutVisual = (item: AboutDustItem) => {
+    if (item.logo) {
+      const Logo = item.logo;
+      return (
+        <div className="s-flex s-h-9 s-w-9 s-flex-shrink-0 s-items-center s-justify-center s-overflow-hidden s-rounded-xl s-border s-border-border s-bg-background dark:s-border-border-night dark:s-bg-muted-background-night">
+          <Logo className="s-h-5 s-w-5" />
+        </div>
+      );
+    }
+    return (
+      <Avatar
+        size="sm"
+        icon={item.icon}
+        backgroundColor="s-bg-highlight-50"
+        iconColor="s-text-highlight-700"
+      />
+    );
+  };
+
+  const renderAboutCard = (
+    item: AboutDustItem,
+    layout: "feature" | "compact"
+  ) =>
+    layout === "feature" ? (
+      <Card
+        key={item.id}
+        size="md"
+        variant="primary"
+        className="s-flex s-h-full s-flex-col s-gap-3"
+      >
+        {renderAboutVisual(item)}
+        <div className="s-flex s-flex-col s-gap-1">
+          <span className="s-heading-base">{item.name}</span>
+          <p className="s-text-sm s-text-muted-foreground dark:s-text-muted-foreground-night">
+            {item.description}
+          </p>
+        </div>
+        <div className="s-mt-auto">
+          <Button variant="outline" size="sm" label={item.action} />
+        </div>
+      </Card>
+    ) : (
+      <Card
+        key={item.id}
+        size="md"
+        variant="primary"
+        className="s-flex s-h-full s-flex-col s-gap-3"
+      >
+        <div className="s-flex s-items-start s-gap-3">
+          {renderAboutVisual(item)}
+          <div className="s-flex s-min-w-0 s-flex-col s-gap-0.5">
+            <span className="s-heading-base s-truncate">{item.name}</span>
+            <p className="s-line-clamp-2 s-text-xs s-text-muted-foreground dark:s-text-muted-foreground-night">
+              {item.description}
+            </p>
+          </div>
+        </div>
+        <Button
+          variant="ghost-secondary"
+          size="xs"
+          label={item.action}
+          icon={ArrowRight}
+          className="s-mt-auto s-self-start"
+        />
+      </Card>
+    );
+
+  const renderAboutDust = () => (
+    <div className="s-flex s-flex-col s-gap-8">
+      {ABOUT_DUST_SECTIONS.map((section) => (
+        <div key={section.id} className="s-flex s-flex-col s-gap-3">
+          <div className="s-flex s-flex-col s-gap-0.5">
+            <div className="s-heading-lg s-text-foreground dark:s-text-foreground-night">
+              {section.title}
+            </div>
+            {section.description && (
+              <p className="s-text-sm s-text-muted-foreground dark:s-text-muted-foreground-night">
+                {section.description}
+              </p>
+            )}
+          </div>
+          <div className="s-grid s-grid-cols-1 s-gap-3 sm:s-grid-cols-2 md:s-grid-cols-3">
+            {section.items.map((item) => renderAboutCard(item, section.layout))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const isAboutDust = displayTab === "about_dust";
+
   return (
     <div
       ref={scrollRef}
@@ -663,15 +960,17 @@ export function NewConversation({
       {/* Bottom portion: grows with its content; the page scrolls as a whole. */}
       <div className="s-flex s-flex-none s-justify-center s-px-4 s-pb-8">
         <div className="s-flex s-w-full s-max-w-4xl s-flex-col s-gap-3">
-          <div className="s-mx-auto s-flex s-w-full s-max-w-3xl s-flex-col s-gap-3 s-px-4 s-text-center s-pb-8">
+          <div className="s-mx-auto s-flex s-w-full s-max-w-3xl s-flex-col s-gap-3 s-px-4 s-pb-8 s-text-center">
             <div className="s-heading-2xl s-text-foreground dark:s-text-foreground-night">
-              Agents & Skills
+              {isAboutDust ? "About Dust" : "Agents & Skills"}
             </div>
             <SearchInput
               name="new-conversation-agent-search"
               value={agentSearch}
               onChange={setAgentSearch}
-              placeholder="Search skills and agents"
+              placeholder={
+                isAboutDust ? "Search Dust" : "Search skills and agents"
+              }
               size="md"
               className="s-w-full"
             />
@@ -687,7 +986,9 @@ export function NewConversation({
             agentCategory={agentCategory}
             onAgentCategoryChange={onAgentCategoryChange}
           />
-          {displayTab === "discover" && !activeCategoryId ? (
+          {isAboutDust ? (
+            renderAboutDust()
+          ) : displayTab === "discover" && !activeCategoryId ? (
             <div className="s-flex s-flex-col s-gap-6">
               {discoverCategories.map((category) => (
                 <div key={category.title} className="s-flex s-flex-col s-gap-3">
