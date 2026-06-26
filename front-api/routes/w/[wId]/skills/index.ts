@@ -4,6 +4,7 @@ import {
   getReferencedSkillSpaceModelIds,
   resolveAdditionalRequestedSpaceModelIds,
 } from "@app/lib/api/skills/space_requirements";
+import { hasFeatureFlag } from "@app/lib/auth";
 import { DataSourceViewResource } from "@app/lib/resources/data_source_view_resource";
 import { FileResource } from "@app/lib/resources/file_resource";
 import { MCPServerViewResource } from "@app/lib/resources/mcp_server_view_resource";
@@ -123,6 +124,10 @@ app.get(
       withInstructions: false,
       withTools: false,
     });
+    const hasSkillFavorites = await hasFeatureFlag(auth, "skill_favorites");
+    const favoriteSkillIds = hasSkillFavorites
+      ? await SkillResource.batchGetFavoriteSkillIds(auth, skills)
+      : new Set<string>();
 
     if (withRelations === "true") {
       const usageMap = await SkillResource.batchFetchUsage(auth, skills);
@@ -146,7 +151,9 @@ app.get(
           instructionsHtml,
           tools,
           ...skillWithoutInstructionsAndTools
-        } = sc.toJSON(auth);
+        } = hasSkillFavorites
+          ? sc.toJSON(auth, { isFavorite: favoriteSkillIds.has(sc.sId) })
+          : sc.toJSON(auth);
 
         const usage = usageMap.get(sc.sId) ?? { count: 0, agents: [] };
         const editors = editorsMap.get(sc.sId) ?? null;
@@ -190,7 +197,9 @@ app.get(
           instructionsHtml,
           tools,
           ...skillWithoutInstructionsAndTools
-        } = sc.toJSON(auth);
+        } = hasSkillFavorites
+          ? sc.toJSON(auth, { isFavorite: favoriteSkillIds.has(sc.sId) })
+          : sc.toJSON(auth);
 
         return skillWithoutInstructionsAndTools;
       }),

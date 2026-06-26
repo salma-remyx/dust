@@ -5,6 +5,7 @@ import { discoverToolsSkill } from "@app/lib/resources/skill/code_defined/discov
 import { SkillResource } from "@app/lib/resources/skill/skill_resource";
 import { AgentConfigurationFactory } from "@app/tests/utils/AgentConfigurationFactory";
 import { DataSourceViewFactory } from "@app/tests/utils/DataSourceViewFactory";
+import { FeatureFlagFactory } from "@app/tests/utils/FeatureFlagFactory";
 import { FileFactory } from "@app/tests/utils/FileFactory";
 import { GroupFactory } from "@app/tests/utils/GroupFactory";
 import { GroupSpaceFactory } from "@app/tests/utils/GroupSpaceFactory";
@@ -40,6 +41,18 @@ function postSkill(workspace: { sId: string }, body: unknown) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  });
+}
+
+function favoriteSkill(workspace: { sId: string }, skillId: string) {
+  return honoApp.request(`/api/w/${workspace.sId}/skills/${skillId}/favorite`, {
+    method: "POST",
+  });
+}
+
+function unfavoriteSkill(workspace: { sId: string }, skillId: string) {
+  return honoApp.request(`/api/w/${workspace.sId}/skills/${skillId}/favorite`, {
+    method: "DELETE",
   });
 }
 
@@ -296,6 +309,125 @@ describe("GET /api/w/:wId/skills", () => {
     } finally {
       fetchInstructionsSpy.mockRestore();
     }
+  });
+
+  it("should not expose or mutate favorite state when the feature flag is disabled", async () => {
+    const { workspace, auth } = await setupTest();
+
+    const skill = await SkillFactory.create(auth, {
+      name: "Disabled Favorite Candidate",
+    });
+    const result = await skill.setFavorite(auth, true);
+    expect(result.isOk()).toBe(true);
+
+    const response = await getSkills(workspace);
+    expect(response.status).toBe(200);
+    const listedSkill = (await response.json()).skills.find(
+      (s: SkillWithoutInstructionsAndToolsType) => s.sId === skill.sId
+    );
+    expect(listedSkill).not.toHaveProperty("isFavorite");
+
+    const relationsResponse = await getSkills(workspace, {
+      withRelations: "true",
+    });
+    expect(relationsResponse.status).toBe(200);
+    const relationsSkill = (await relationsResponse.json()).skills.find(
+      (s: SkillWithoutInstructionsAndToolsWithRelationsType) =>
+        s.sId === skill.sId
+    );
+    expect(relationsSkill).not.toHaveProperty("isFavorite");
+
+    const favoriteResponse = await favoriteSkill(workspace, skill.sId);
+    expect(favoriteResponse.status).toBe(403);
+    expect((await favoriteResponse.json()).error.type).toBe(
+      "feature_flag_not_found"
+    );
+
+    const unfavoriteResponse = await unfavoriteSkill(workspace, skill.sId);
+    expect(unfavoriteResponse.status).toBe(403);
+    expect((await unfavoriteResponse.json()).error.type).toBe(
+      "feature_flag_not_found"
+    );
+  });
+
+  it("should include favorite state for custom skills", async () => {
+    const { workspace, auth } = await setupTest();
+    await FeatureFlagFactory.basic(auth, "skill_favorites");
+
+    const skill = await SkillFactory.create(auth, {
+      name: "Favorite Candidate",
+    });
+
+    const firstResponse = await getSkills(workspace);
+    expect(firstResponse.status).toBe(200);
+    const firstSkill = (await firstResponse.json()).skills.find(
+      (s: SkillWithoutInstructionsAndToolsType) => s.sId === skill.sId
+    );
+    expect(firstSkill?.isFavorite).toBe(false);
+
+    const favoriteResponse = await favoriteSkill(workspace, skill.sId);
+    expect(favoriteResponse.status).toBe(200);
+
+    const secondResponse = await getSkills(workspace);
+    expect(secondResponse.status).toBe(200);
+    const secondSkill = (await secondResponse.json()).skills.find(
+      (s: SkillWithoutInstructionsAndToolsType) => s.sId === skill.sId
+    );
+    expect(secondSkill?.isFavorite).toBe(true);
+
+    const relationsResponse = await getSkills(workspace, {
+      withRelations: "true",
+    });
+    expect(relationsResponse.status).toBe(200);
+    const relationsSkill = (await relationsResponse.json()).skills.find(
+      (s: SkillWithoutInstructionsAndToolsWithRelationsType) =>
+        s.sId === skill.sId
+    );
+    expect(relationsSkill?.isFavorite).toBe(true);
+
+    const unfavoriteResponse = await unfavoriteSkill(workspace, skill.sId);
+    expect(unfavoriteResponse.status).toBe(200);
+
+    const thirdResponse = await getSkills(workspace);
+    expect(thirdResponse.status).toBe(200);
+    const thirdSkill = (await thirdResponse.json()).skills.find(
+      (s: SkillWithoutInstructionsAndToolsType) => s.sId === skill.sId
+    );
+    expect(thirdSkill?.isFavorite).toBe(false);
+  });
+
+  it("should include favorite state for global skills", async () => {
+    const { workspace, auth } = await setupTest();
+    await FeatureFlagFactory.basic(auth, "skill_favorites");
+
+    const favoriteResponse = await favoriteSkill(workspace, "frames");
+    expect(favoriteResponse.status).toBe(200);
+
+    const response = await getSkills(workspace);
+    expect(response.status).toBe(200);
+    const framesSkill = (await response.json()).skills.find(
+      (s: SkillWithoutInstructionsAndToolsType) => s.sId === "frames"
+    );
+    expect(framesSkill?.isFavorite).toBe(true);
+  });
+
+  it("should not favorite archived skills", async () => {
+    const { workspace, auth } = await setupTest();
+    await FeatureFlagFactory.basic(auth, "skill_favorites");
+
+    const skill = await SkillFactory.create(auth, {
+      name: "Archived Favorite Candidate",
+      status: "archived",
+    });
+
+    const response = await favoriteSkill(workspace, skill.sId);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        type: "invalid_request_error",
+        message: "Only active skills can be favorited.",
+      },
+    });
   });
 });
 

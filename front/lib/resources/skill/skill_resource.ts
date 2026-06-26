@@ -23,6 +23,7 @@ import {
   ConversationSkillModel,
 } from "@app/lib/models/skill/conversation_skill";
 import { GroupSkillModel } from "@app/lib/models/skill/group_skill";
+import { SkillFavoriteModel } from "@app/lib/models/skill/skill_favorite";
 import { SkillReferenceModel } from "@app/lib/models/skill/skill_reference";
 import { SkillSuggestionModel } from "@app/lib/models/skill/skill_suggestion";
 import { BaseResource } from "@app/lib/resources/base_resource";
@@ -160,6 +161,11 @@ type ConversationSkillCreationAttributes =
           agentConfigurationId: string;
         }
     );
+
+type SkillReferenceFields = {
+  customSkillId: ModelId | null;
+  globalSkillId: string | null;
+};
 
 function isSkillResourceWithVersion(
   skill: SkillResource
@@ -1051,10 +1057,7 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
    */
   private static fetchBySkillReferences(
     auth: Authenticator,
-    refs: {
-      customSkillId: ModelId | null;
-      globalSkillId: string | null;
-    }[],
+    refs: SkillReferenceFields[],
     {
       agentLoopData,
       status,
@@ -1096,6 +1099,145 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
     return this.globalSId
       ? { globalSkillId: this.globalSId }
       : { customSkillId: this.id };
+  }
+
+  private get skillReferenceFields(): SkillReferenceFields {
+    return this.globalSId
+      ? { customSkillId: null, globalSkillId: this.globalSId }
+      : { customSkillId: this.id, globalSkillId: null };
+  }
+
+  static async batchGetFavoriteSkillIds(
+    auth: Authenticator,
+    skills: SkillResource[]
+  ): Promise<Set<string>> {
+    const user = auth.user();
+    if (!user || skills.length === 0) {
+      return new Set();
+    }
+
+    const workspace = auth.getNonNullableWorkspace();
+    const customSkillIds = removeNulls(
+      skills.map((skill) => (skill.globalSId ? null : skill.id))
+    );
+    const globalSkillIds = removeNulls(skills.map((skill) => skill.globalSId));
+    const skillClauses = removeNulls([
+      customSkillIds.length > 0
+        ? { customSkillId: { [Op.in]: customSkillIds } }
+        : null,
+      globalSkillIds.length > 0
+        ? { globalSkillId: { [Op.in]: globalSkillIds } }
+        : null,
+    ]);
+
+    if (skillClauses.length === 0) {
+      return new Set();
+    }
+
+    const favorites = await SkillFavoriteModel.findAll({
+      attributes: ["customSkillId", "globalSkillId"],
+      where: {
+        workspaceId: workspace.id,
+        userId: user.id,
+        [Op.or]: skillClauses,
+      },
+    });
+
+    return new Set(
+      removeNulls(
+        favorites.map((favorite) => {
+          if (favorite.globalSkillId) {
+            return favorite.globalSkillId;
+          }
+
+          if (favorite.customSkillId) {
+            return this.modelIdToSId({
+              id: favorite.customSkillId,
+              workspaceId: workspace.id,
+            });
+          }
+
+          return null;
+        })
+      )
+    );
+  }
+
+  static async listFavoritesForCurrentUser(
+    auth: Authenticator,
+    {
+      agentLoopData,
+    }: {
+      agentLoopData?: AgentLoopExecutionData;
+    } = {}
+  ): Promise<SkillResource[]> {
+    const user = auth.user();
+    if (!user) {
+      return [];
+    }
+
+    const workspace = auth.getNonNullableWorkspace();
+    const favorites = await SkillFavoriteModel.findAll({
+      attributes: ["customSkillId", "globalSkillId"],
+      where: {
+        workspaceId: workspace.id,
+        userId: user.id,
+      },
+      order: [["createdAt", "ASC"]],
+    });
+
+    if (favorites.length === 0) {
+      return [];
+    }
+
+    return this.fetchBySkillReferences(
+      auth,
+      favorites.map((favorite) => ({
+        customSkillId: favorite.customSkillId,
+        globalSkillId: favorite.globalSkillId,
+      })),
+      {
+        agentLoopData,
+        status: "active",
+      }
+    );
+  }
+
+  async setFavorite(
+    auth: Authenticator,
+    isFavorite: boolean
+  ): Promise<Result<undefined, Error>> {
+    const user = auth.user();
+    if (!user) {
+      return new Err(new Error("User must be authenticated"));
+    }
+
+    if (isFavorite && this.status !== "active") {
+      return new Err(new Error("Only active skills can be favorited."));
+    }
+
+    const workspace = auth.getNonNullableWorkspace();
+    const where = {
+      workspaceId: workspace.id,
+      userId: user.id,
+      ...this.skillReference,
+    };
+
+    if (!isFavorite) {
+      await SkillFavoriteModel.destroy({ where });
+      return new Ok(undefined);
+    }
+
+    await SkillFavoriteModel.findOrCreate({
+      where,
+      defaults: {
+        workspaceId: workspace.id,
+        userId: user.id,
+        ...this.skillReferenceFields,
+      },
+    });
+
+    return new Ok(undefined);
   }
 
   static async listByAgentConfiguration(
@@ -3650,7 +3792,10 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
     }
   }
 
-  toJSON(auth: Authenticator): SkillType {
+  toJSON(
+    auth: Authenticator,
+    { isFavorite }: { isFavorite?: boolean } = {}
+  ): SkillType {
     const requestedSpaceIds = this.requestedSpaceIds.map((spaceId) =>
       SpaceResource.modelIdToSId({
         id: spaceId,
@@ -3715,6 +3860,7 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
       isExtendable: false,
       isDefault: this.isDefault,
       extendedSkillId: null,
+      ...(isFavorite !== undefined ? { isFavorite } : {}),
     };
   }
 
