@@ -1,4 +1,5 @@
 import { ArchiveSkillDialog } from "@app/components/skills/ArchiveSkillDialog";
+import { SkillFavoriteButton } from "@app/components/skills/SkillFavoriteButton";
 import { UsedByButton } from "@app/components/spaces/UsedByButton";
 import { usePaginationFromUrl } from "@app/hooks/usePaginationFromUrl";
 import { useAppRouter } from "@app/lib/platform";
@@ -25,7 +26,10 @@ type RowData = {
   usage: SkillUsageType;
   updatedAt: number | null;
   createdAt: number | null;
+  isFavorite: boolean;
+  canToggleFavorite: boolean;
   onClick: () => void;
+  onFavoriteChange: (isFavorite: boolean) => void;
   menuItems: MenuItem[];
 };
 
@@ -38,6 +42,14 @@ const nameColumn = {
     return (
       <DataTable.CellContent>
         <div className="flex flex-row items-center gap-2 py-3">
+          {info.row.original.canToggleFavorite && (
+            <SkillFavoriteButton
+              size="icon-xs"
+              isFavorite={info.row.original.isFavorite}
+              skill={{ name: info.getValue() }}
+              onFavoriteChange={info.row.original.onFavoriteChange}
+            />
+          )}
           <div>
             <SkillAvatar />
           </div>
@@ -156,19 +168,26 @@ const getTableColumns = (
 type SkillsTableProps = {
   skills: SkillWithoutInstructionsAndToolsWithRelationsType[];
   owner: LightWorkspaceType;
+  showFavoriteControls: boolean;
   onSkillClick: (
     skill: SkillWithoutInstructionsAndToolsWithRelationsType
   ) => void;
   onAgentClick: (agentId: string) => void;
   onUsedBySkillClick: (skillId: string) => void;
+  onFavoriteChange: (
+    skill: SkillWithoutInstructionsAndToolsWithRelationsType,
+    isFavorite: boolean
+  ) => void;
 };
 
 export function SkillsTable({
   skills,
   owner,
+  showFavoriteControls,
   onSkillClick,
   onAgentClick,
   onUsedBySkillClick,
+  onFavoriteChange,
 }: SkillsTableProps) {
   const router = useAppRouter();
   const { pagination, setPagination } = usePaginationFromUrl({});
@@ -187,8 +206,15 @@ export function SkillsTable({
         usage: skill.relations.usage,
         updatedAt: skill.updatedAt,
         createdAt: skill.createdAt,
+        isFavorite: skill.isFavorite ?? false,
+        canToggleFavorite:
+          showFavoriteControls &&
+          (skill.status === "active" || (skill.isFavorite ?? false)),
         onClick: () => {
           onSkillClick(skill);
+        },
+        onFavoriteChange: (isFavorite: boolean) => {
+          onFavoriteChange(skill, isFavorite);
         },
         menuItems:
           skill.status !== "archived"
@@ -229,7 +255,14 @@ export function SkillsTable({
             : [],
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- router is not stable, mutating the skills list which prevent pagination to work
-    [skills, onSkillClick, onUsedBySkillClick, owner.sId]
+    [
+      skills,
+      onSkillClick,
+      onUsedBySkillClick,
+      onFavoriteChange,
+      owner.sId,
+      showFavoriteControls,
+    ]
   );
 
   if (rows.length === 0) {

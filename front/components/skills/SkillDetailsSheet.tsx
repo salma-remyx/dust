@@ -33,6 +33,10 @@ import { useState } from "react";
 type SkillDetailsProps = {
   skill: SkillWithoutInstructionsAndToolsWithRelationsType | null;
   onClose: () => void;
+  onFavoriteChange?: (
+    skill: SkillWithoutInstructionsAndToolsWithRelationsType,
+    isFavorite: boolean
+  ) => void;
   owner: WorkspaceType;
   user: UserType;
 };
@@ -40,6 +44,7 @@ type SkillDetailsProps = {
 export function SkillDetailsSheet({
   skill,
   onClose,
+  onFavoriteChange,
   user,
   owner,
 }: SkillDetailsProps) {
@@ -64,6 +69,7 @@ export function SkillDetailsSheet({
                 skill={skill}
                 owner={owner}
                 onClose={onClose}
+                onFavoriteChange={onFavoriteChange}
               />
             </SheetHeader>
             <SheetContainer className="pb-4">
@@ -139,12 +145,17 @@ type DescriptionSectionProps = {
   skill: SkillWithoutInstructionsAndToolsWithRelationsType;
   owner: WorkspaceType;
   onClose: () => void;
+  onFavoriteChange?: (
+    skill: SkillWithoutInstructionsAndToolsWithRelationsType,
+    isFavorite: boolean
+  ) => void;
 };
 
 const DescriptionSection = ({
   skill,
   owner,
   onClose,
+  onFavoriteChange,
 }: DescriptionSectionProps) => {
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   const { editedByUser } = skill.relations;
@@ -180,7 +191,12 @@ const DescriptionSection = ({
       </div>
 
       {skill.status === "active" && (
-        <SkillDetailsButtonBar owner={owner} skill={skill} onClose={onClose} />
+        <SkillDetailsButtonBar
+          owner={owner}
+          skill={skill}
+          onClose={onClose}
+          onFavoriteChange={onFavoriteChange}
+        />
       )}
 
       {skill.status === "archived" && (

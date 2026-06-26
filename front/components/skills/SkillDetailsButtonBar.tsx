@@ -1,4 +1,5 @@
 import { ArchiveSkillDialog } from "@app/components/skills/ArchiveSkillDialog";
+import { SkillFavoriteButton } from "@app/components/skills/SkillFavoriteButton";
 import { getSkillBuilderRoute } from "@app/lib/utils/router";
 import type { SkillWithoutInstructionsAndToolsWithRelationsType } from "@app/types/assistant/skill_configuration";
 import type { WorkspaceType } from "@app/types/user";
@@ -18,16 +19,21 @@ interface SkillDetailsButtonBarProps {
   skill: SkillWithoutInstructionsAndToolsWithRelationsType;
   owner: WorkspaceType;
   onClose: () => void;
+  onFavoriteChange?: (
+    skill: SkillWithoutInstructionsAndToolsWithRelationsType,
+    isFavorite: boolean
+  ) => void;
 }
 
 export function SkillDetailsButtonBar({
   skill,
   owner,
   onClose,
+  onFavoriteChange,
 }: SkillDetailsButtonBarProps) {
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
 
-  if (!skill.canWrite) {
+  if (!skill.canWrite && !onFavoriteChange) {
     return null;
   }
 
@@ -43,6 +49,15 @@ export function SkillDetailsButtonBar({
         }}
       />
       <div className="flex flex-row items-center gap-2 px-1.5">
+        {onFavoriteChange && (
+          <SkillFavoriteButton
+            isFavorite={skill.isFavorite ?? false}
+            skill={skill}
+            onFavoriteChange={(isFavorite) =>
+              onFavoriteChange(skill, isFavorite)
+            }
+          />
+        )}
         {skill.canWrite && (
           <Button
             size="sm"
@@ -52,12 +67,12 @@ export function SkillDetailsButtonBar({
             icon={Edit04}
           />
         )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button icon={DotsHorizontal} size="sm" variant="ghost" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            {skill.canWrite && (
+        {skill.canWrite && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button icon={DotsHorizontal} size="sm" variant="ghost" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
               <DropdownMenuItem
                 label="Archive"
                 icon={Trash01}
@@ -67,9 +82,9 @@ export function SkillDetailsButtonBar({
                   setShowArchiveDialog(true);
                 }}
               />
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </>
   );

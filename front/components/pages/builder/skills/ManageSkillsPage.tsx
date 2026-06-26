@@ -10,9 +10,16 @@ import {
   useSetPageTitle,
 } from "@app/components/sparkle/AppLayoutContext";
 import { useHashParam } from "@app/hooks/useHashParams";
-import { useAuth, useWorkspace } from "@app/lib/auth/AuthContext";
+import {
+  useAuth,
+  useFeatureFlags,
+  useWorkspace,
+} from "@app/lib/auth/AuthContext";
 import { SKILL_ICON } from "@app/lib/skill";
-import { useSkillsWithRelations } from "@app/lib/swr/skill_configurations";
+import {
+  useSkillsWithRelations,
+  useUpdateSkillFavorite,
+} from "@app/lib/swr/skill_configurations";
 import { compareForFuzzySort, subFilter } from "@app/lib/utils";
 import { getSkillBuilderRoute } from "@app/lib/utils/router";
 import type { SkillWithoutInstructionsAndToolsWithRelationsType } from "@app/types/assistant/skill_configuration";
@@ -39,6 +46,11 @@ const SKILL_MANAGER_TABS = [
     id: "active",
     label: "All",
     description: "All active skills.",
+  },
+  {
+    id: "favorite",
+    label: "Favorites",
+    description: "Skills you have favorited.",
   },
   {
     id: "editable_by_me",
@@ -77,9 +89,29 @@ function sortSkillsByName(
   return [...skills].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function sortSkillsForDiscovery(
+  skills: SkillWithoutInstructionsAndToolsWithRelationsType[],
+  hasSkillFavorites: boolean
+) {
+  if (!hasSkillFavorites) {
+    return sortSkillsByName(skills);
+  }
+
+  return [...skills].sort((a, b) => {
+    const aIsFavorite = a.isFavorite ?? false;
+    const bIsFavorite = b.isFavorite ?? false;
+    if (aIsFavorite !== bIsFavorite) {
+      return aIsFavorite ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export function ManageSkillsPage() {
   const owner = useWorkspace();
   const { user } = useAuth();
+  const { hasFeature } = useFeatureFlags();
+  const hasSkillFavorites = hasFeature("skill_favorites");
   const [selectedSkill, setSelectedSkill] =
     useState<SkillWithoutInstructionsAndToolsWithRelationsType | null>(null);
   const [agentId, setAgentId] = useState<string | null>(null);
@@ -87,15 +119,20 @@ export function ManageSkillsPage() {
   const [selectedTab, setSelectedTab] = useHashParam("selectedTab", "active");
   const [skillSearch, setSkillSearch] = useState("");
   const [skillIdParam, setSkillIdParam] = useHashParam("skillId");
+  const { updateSkillFavorite } = useUpdateSkillFavorite({ owner });
 
   const isSearchActive = !isEmptyString(skillSearch);
 
   const activeTab = useMemo(() => {
-    if (selectedTab && isValidTab(selectedTab)) {
+    if (
+      selectedTab &&
+      isValidTab(selectedTab) &&
+      (hasSkillFavorites || selectedTab !== "favorite")
+    ) {
       return selectedTab;
     }
     return "active";
-  }, [selectedTab]);
+  }, [hasSkillFavorites, selectedTab]);
 
   const {
     skillsWithRelations: activeSkills,
@@ -123,8 +160,19 @@ export function ManageSkillsPage() {
     disabled: activeTab !== "active",
   });
 
+  const skillManagerTabs = useMemo(
+    () =>
+      SKILL_MANAGER_TABS.filter(
+        (tab) => hasSkillFavorites || tab.id !== "favorite"
+      ),
+    [hasSkillFavorites]
+  );
+
   const skillsByTab = useMemo(() => {
-    const sortedActiveSkills = sortSkillsByName(activeSkills);
+    const sortedActiveSkills = sortSkillsForDiscovery(
+      activeSkills,
+      hasSkillFavorites
+    );
     const sortedArchivedSkills = sortSkillsByName(archivedSkills);
 
     const searchLower = skillSearch.toLowerCase();
@@ -147,6 +195,9 @@ export function ManageSkillsPage() {
 
     return {
       active: filteredList(sortedActiveSkills),
+      favorite: filteredList(
+        sortedActiveSkills.filter((s) => s.isFavorite ?? false)
+      ),
       editable_by_me: filteredList(
         sortedActiveSkills.filter((s) =>
           s.relations.editors?.some((e) => e.sId === user?.sId)
@@ -168,19 +219,16 @@ export function ManageSkillsPage() {
       ),
       archived: filteredList(sortedArchivedSkills),
     };
-  }, [activeSkills, archivedSkills, skillSearch, user, isSearchActive]);
+  }, [
+    activeSkills,
+    archivedSkills,
+    hasSkillFavorites,
+    skillSearch,
+    user,
+    isSearchActive,
+  ]);
 
   const isLoading = isActiveLoading || isArchivedLoading || isSuggestedLoading;
-
-  // Open skill from hash param when skills are loaded.
-  useEffect(() => {
-    if (skillIdParam && !isActiveLoading && activeSkills.length > 0) {
-      const skillFromParam = activeSkills.find((s) => s.sId === skillIdParam);
-      if (skillFromParam && selectedSkill?.sId !== skillIdParam) {
-        setSelectedSkill(skillFromParam);
-      }
-    }
-  }, [skillIdParam, activeSkills, isActiveLoading, selectedSkill?.sId]);
 
   const handleSkillSelect = useCallback(
     (skill: SkillWithoutInstructionsAndToolsWithRelationsType | null) => {
@@ -188,6 +236,23 @@ export function ManageSkillsPage() {
       setSkillIdParam(skill?.sId);
     },
     [setSkillIdParam]
+  );
+
+  const handleFavoriteChange = useCallback(
+    async (
+      skill: SkillWithoutInstructionsAndToolsWithRelationsType,
+      isFavorite: boolean
+    ) => {
+      const didUpdate = await updateSkillFavorite(skill, isFavorite);
+      if (didUpdate) {
+        setSelectedSkill((currentSkill) =>
+          currentSkill?.sId === skill.sId
+            ? { ...currentSkill, isFavorite }
+            : currentSkill
+        );
+      }
+    },
+    [updateSkillFavorite]
   );
 
   const knownSkillsById = useMemo(
@@ -199,6 +264,24 @@ export function ManageSkillsPage() {
       ),
     [activeSkills, archivedSkills, suggestedSkills]
   );
+
+  // Open or refresh skill from hash param when skills are loaded.
+  useEffect(() => {
+    if (!skillIdParam || isActiveLoading || activeSkills.length === 0) {
+      return;
+    }
+
+    const skillFromParam = knownSkillsById.get(skillIdParam);
+    if (skillFromParam && skillFromParam !== selectedSkill) {
+      setSelectedSkill(skillFromParam);
+    }
+  }, [
+    skillIdParam,
+    activeSkills,
+    isActiveLoading,
+    knownSkillsById,
+    selectedSkill,
+  ]);
 
   const handleUsedBySkillSelect = useCallback(
     (skillId: string) => {
@@ -254,6 +337,7 @@ export function ManageSkillsPage() {
       <SkillDetailsSheet
         skill={selectedSkill}
         onClose={() => handleSkillSelect(null)}
+        onFavoriteChange={hasSkillFavorites ? handleFavoriteChange : undefined}
         user={user}
         owner={owner}
       />
@@ -308,7 +392,7 @@ export function ManageSkillsPage() {
           <div className="flex flex-col pt-3">
             <Tabs value={activeTab}>
               <TabsList>
-                {SKILL_MANAGER_TABS.map((tab) => (
+                {skillManagerTabs.map((tab) => (
                   <TabsTrigger
                     key={tab.id}
                     value={tab.id}
@@ -338,9 +422,13 @@ export function ManageSkillsPage() {
                 <SkillsTable
                   owner={owner}
                   skills={skillsByTab[activeTab]}
+                  showFavoriteControls={hasSkillFavorites}
                   onSkillClick={handleSkillSelect}
                   onAgentClick={setAgentId}
                   onUsedBySkillClick={handleUsedBySkillSelect}
+                  onFavoriteChange={(skill, isFavorite) => {
+                    void handleFavoriteChange(skill, isFavorite);
+                  }}
                 />
               </>
             )}
