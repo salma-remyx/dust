@@ -365,6 +365,9 @@ export function createSlackPersonalTools(
   mcpServerId: string,
   agentLoopContext?: AgentLoopContextType
 ): SlackPersonalToolsResult {
+  const allowFooterRemoval =
+    auth.workspace()?.metadata?.slackPersonalAllowFooterRemoval ?? false;
+
   const handlers: ToolHandlers<typeof SLACK_PERSONAL_TOOLS_METADATA> = {
     search_messages: async (
       {
@@ -551,7 +554,15 @@ export function createSlackPersonalTools(
     },
 
     post_message: async (
-      { to, message, threadTs, fileId, unfurlLinks, unfurlMedia },
+      {
+        to,
+        message,
+        threadTs,
+        fileId,
+        unfurlLinks,
+        unfurlMedia,
+        show_sent_by_footer,
+      },
       { authInfo }
     ) => {
       const accessToken = authInfo?.token;
@@ -574,6 +585,7 @@ export function createSlackPersonalTools(
           unfurlLinks,
           unfurlMedia,
           accessToken,
+          showSentByFooter: show_sent_by_footer ?? true,
         });
       } catch (error) {
         const authError = handleSlackAuthError(error);
@@ -587,7 +599,15 @@ export function createSlackPersonalTools(
     },
 
     schedule_message: async (
-      { to, message, post_at, threadTs, unfurlLinks, unfurlMedia },
+      {
+        to,
+        message,
+        post_at,
+        threadTs,
+        unfurlLinks,
+        unfurlMedia,
+        show_sent_by_footer,
+      },
       { authInfo }
     ) => {
       const accessToken = authInfo?.token;
@@ -610,6 +630,7 @@ export function createSlackPersonalTools(
           unfurlLinks,
           unfurlMedia,
           accessToken,
+          showSentByFooter: show_sent_by_footer ?? true,
         });
       } catch (error) {
         const authError = handleSlackAuthError(error);
@@ -997,7 +1018,21 @@ export function createSlackPersonalTools(
     },
   };
 
-  const tools = buildTools(SLACK_PERSONAL_TOOLS_METADATA, handlers);
+  const rawTools = buildTools(SLACK_PERSONAL_TOOLS_METADATA, handlers);
+
+  // When footer removal is not allowed, strip show_sent_by_footer from the schema so
+  // the LLM never sees the parameter — the handler already enforces true server-side.
+  const tools = allowFooterRemoval
+    ? rawTools
+    : rawTools.map((tool) => {
+        if (tool.name === "post_message" || tool.name === "schedule_message") {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { show_sent_by_footer: _stripped, ...schemaWithoutFooter } =
+            tool.schema;
+          return { ...tool, schema: schemaWithoutFooter };
+        }
+        return tool;
+      });
 
   const searchMessagesTool = tools.find((t) => t.name === "search_messages")!;
   const semanticSearchMessagesTool = tools.find(
