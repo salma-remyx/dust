@@ -7,7 +7,7 @@ import {
   filterUsersWithSharedMembership,
   hasSharedMembership,
 } from "@app/lib/api/user";
-import type { Authenticator } from "@app/lib/auth";
+import { type Authenticator, hasFeatureFlag } from "@app/lib/auth";
 import { hasAll } from "@app/lib/matcher/operators/array";
 import { AgentConfigurationModel } from "@app/lib/models/agent/agent";
 import { AgentSkillModel } from "@app/lib/models/agent/agent_skill";
@@ -1622,6 +1622,11 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
         agentLoopData,
       });
     }
+    const favoriteSkills = (await hasFeatureFlag(auth, "skill_favorites"))
+      ? await this.listFavoritesForCurrentUser(auth, {
+          agentLoopData,
+        })
+      : [];
 
     const sortByName = (a: SkillResource, b: SkillResource) =>
       a.name.localeCompare(b.name);
@@ -1701,6 +1706,13 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
     const agentEquippedSkillIds = new Set(
       [...agentEquippedSkills, ...autoEquippedSkills].map((s) => s.sId)
     );
+    const favoriteEquippedSkills = favoriteSkills.filter((skill) => {
+      if (agentEquippedSkillIds.has(skill.sId)) {
+        return false;
+      }
+      agentEquippedSkillIds.add(skill.sId);
+      return true;
+    });
     const discoveredSkills = discoverableSkills.filter(
       (s) => !agentEquippedSkillIds.has(s.sId)
     );
@@ -1708,6 +1720,7 @@ export class SkillResource extends BaseResource<SkillConfigurationModel> {
     const equippedSkills = removeNulls([
       ...agentEquippedSkills.sort(sortByName),
       ...autoEquippedSkills.sort(sortByName),
+      ...favoriteEquippedSkills.sort(sortByName),
       ...discoveredSkills.sort(sortByName),
     ]);
 
