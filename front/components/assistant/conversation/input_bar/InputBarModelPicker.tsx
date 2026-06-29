@@ -25,8 +25,6 @@ import {
 } from "@dust-tt/sparkle";
 import { useMemo, useState } from "react";
 
-// Frontend-only picker. Tiers are display labels for now — selecting anything
-// here only updates local UI state and does not affect generation.
 const TIERS = ["Fast", "Balanced", "Powerful", "Frontier"] as const;
 type Tier = (typeof TIERS)[number];
 
@@ -43,9 +41,13 @@ type Selection =
   | { kind: "tier"; tier: Tier }
   | { kind: "advanced"; model: ModelConfigurationType | null };
 
+// `modelId` is not unique across providers, so identify models by
+// `providerId/modelId`. Used for radio values and equality checks.
+function getModelKey(model: { providerId: string; modelId: string }): string {
+  return `${model.providerId}/${model.modelId}`;
+}
+
 interface InputBarModelPickerProps {
-  // The selected agent's configured model. Used as the default preselection:
-  // for most agents this resolves to "Advanced > the agent's model".
   agentModel: AgentModelConfigurationType | null;
   owner: LightWorkspaceType;
   buttonSize: "xs" | "sm";
@@ -68,18 +70,30 @@ export function InputBarModelPicker({
     model: null,
   });
 
-  // Fetch eagerly (not gated on open): the trigger label resolves the agent's
-  // model name from this list even while the dropdown is closed. SWR caches it.
-  // Skipped entirely when the flag is off (the component renders null below).
+  // Reset on agent change
+  const agentModelKey = agentModel
+    ? `${agentModel.providerId}/${agentModel.modelId}`
+    : null;
+  const [prevAgentModelKey, setPrevAgentModelKey] = useState(agentModelKey);
+  if (agentModelKey !== prevAgentModelKey) {
+    setPrevAgentModelKey(agentModelKey);
+    setSelection({ kind: "advanced", model: null });
+  }
+
   const { models, isModelsLoading } = useModels({
     owner,
     disabled: !hasModelsPicker,
   });
 
-  // The agent's configured model resolved against the enabled model list.
+  // Match on providerId + modelId, since modelId is not unique across providers.
   const resolvedAgentModel = useMemo(
-    () => models.find((m) => m.modelId === agentModel?.modelId) ?? null,
-    [models, agentModel?.modelId]
+    () =>
+      models.find(
+        (m) =>
+          m.providerId === agentModel?.providerId &&
+          m.modelId === agentModel?.modelId
+      ) ?? null,
+    [models, agentModel?.providerId, agentModel?.modelId]
   );
 
   const isAdvancedActive = selection.kind === "advanced";
@@ -141,19 +155,23 @@ export function InputBarModelPicker({
                 </div>
               ) : (
                 <DropdownMenuRadioGroup
-                  value={effectiveAdvancedModel?.modelId ?? undefined}
+                  value={
+                    effectiveAdvancedModel
+                      ? getModelKey(effectiveAdvancedModel)
+                      : undefined
+                  }
                 >
                   {models.map((model) => (
                     <DropdownMenuRadioItem
-                      key={`${model.providerId}/${model.modelId}`}
-                      value={model.modelId}
+                      key={getModelKey(model)}
+                      value={getModelKey(model)}
                       icon={getModelProviderLogo(model.providerId, isDark)}
                       label={model.displayName}
                       description={getProviderDisplayName(model.providerId)}
-                      // Flag the agent's configured model so the default is
-                      // recognizable when the picker opens.
                       endComponent={
-                        model.modelId === resolvedAgentModel?.modelId ? (
+                        resolvedAgentModel &&
+                        getModelKey(model) ===
+                          getModelKey(resolvedAgentModel) ? (
                           <Chip size="mini" label="Default" color="highlight" />
                         ) : undefined
                       }
