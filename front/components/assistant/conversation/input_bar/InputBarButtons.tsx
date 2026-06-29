@@ -2,6 +2,7 @@ import { AgentPicker } from "@app/components/assistant/AgentPicker";
 import { CapabilitiesPicker } from "@app/components/assistant/CapabilitiesPicker";
 import { InputBarAttachmentsPicker } from "@app/components/assistant/conversation/input_bar/InputBarAttachmentsPicker";
 import type { InputBarAction } from "@app/components/assistant/conversation/input_bar/InputBarContainer";
+import { InputBarModelPicker } from "@app/components/assistant/conversation/input_bar/InputBarModelPicker";
 import type useCustomEditor from "@app/components/editor/input_bar/useCustomEditor";
 import type { FileUploaderService } from "@app/hooks/useFileUploaderService";
 import type { MCPServerViewType } from "@app/lib/api/mcp";
@@ -247,9 +248,20 @@ export const InputBarButtons = React.memo(function InputBarButtons({
         />
       </>
     );
+  // Gated behind the `models_picker` feature flag (handled inside the
+  // component, which renders null when the flag is off).
+  const modelPickerButton = (
+    <InputBarModelPicker
+      owner={owner}
+      buttonSize={buttonSize}
+      disabled={isInputDisabled}
+    />
+  );
+
   return (
     <>
       {agentButton}
+      {modelPickerButton}
       {!hideCapabilities && toolsButton}
       {attachmentButton}
     </>

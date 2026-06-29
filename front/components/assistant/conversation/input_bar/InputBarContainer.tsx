@@ -1511,11 +1511,20 @@ const InputBarContainer = ({
               <div
                 className={cn(
                   "flex w-full items-center px-2",
+                  // The voice/send cluster is absolutely positioned at the
+                  // bottom-right. On mobile the button row would otherwise slide
+                  // underneath it, so reserve that space and let the row scroll.
+                  isMobile && "pr-32",
                   isToolbarOpen && "opacity-0"
                 )}
               >
                 {!isRecording && (
-                  <div className="flex items-center">
+                  <div
+                    className={cn(
+                      "flex items-center",
+                      isMobile && "min-w-0 overflow-x-auto scrollbar-hide"
+                    )}
+                  >
                     <Button
                       variant="ghost-secondary"
                       icon={Type01}
