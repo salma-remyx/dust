@@ -5,6 +5,7 @@ import { useModels } from "@app/lib/swr/models";
 import type { AgentModelConfigurationType } from "@app/types/assistant/agent";
 import { getProviderDisplayName } from "@app/types/assistant/models/providers";
 import type { ModelConfigurationType } from "@app/types/assistant/models/types";
+import { assertNeverAndIgnore } from "@app/types/shared/utils/assert_never";
 import type { LightWorkspaceType } from "@app/types/user";
 import {
   Button,
@@ -102,10 +103,17 @@ export function InputBarModelPicker({
     ? (selection.model ?? resolvedAgentModel)
     : resolvedAgentModel;
 
-  const label =
-    selection.kind === "tier"
-      ? selection.tier
-      : (effectiveAdvancedModel?.displayName ?? "Advanced");
+  const label = (() => {
+    switch (selection.kind) {
+      case "tier":
+        return selection.tier;
+      case "advanced":
+        return effectiveAdvancedModel?.displayName ?? "Advanced";
+      default:
+        assertNeverAndIgnore(selection);
+        return "Advanced";
+    }
+  })();
 
   if (!hasModelsPicker) {
     return null;
