@@ -19,6 +19,7 @@ import {
   getProductPrepaidCommitId,
   getProductSeatSubscriptionCommitId,
   HUBSPOT_DEAL_ID_CUSTOM_FIELD_KEY,
+  LEGACY_CREDIT_MIGRATION_CUSTOM_FIELD_KEY,
   oneYearAfter,
 } from "@app/lib/metronome/constants";
 import {
@@ -36,6 +37,7 @@ import {
 } from "@app/lib/metronome/types";
 import { resolveCurrencyFromStripe } from "@app/lib/plans/billing_currency";
 import {
+  CREDIT_PRICED_BUSINESS_LEGACY_LARGE_PLAN_CODE,
   CREDIT_PRICED_BUSINESS_PLAN_CODE,
   isEnterprisePlanPrefix,
   isProPlanPrefix,
@@ -51,7 +53,10 @@ import { WorkspaceSeatLimitResource } from "@app/lib/resources/workspace_seat_li
 import { renderLightWorkspaceType } from "@app/lib/workspace";
 import logger from "@app/logger/logger";
 import type { SupportedCurrency } from "@app/types/currency";
-import { isMembershipSeatType } from "@app/types/memberships";
+import {
+  isMembershipSeatType,
+  type MembershipSeatType,
+} from "@app/types/memberships";
 import type { Result } from "@app/types/shared/result";
 import { Err, Ok } from "@app/types/shared/result";
 import { normalizeError } from "@app/types/shared/utils/error_utils";
@@ -128,6 +133,21 @@ export const SwitchContractBodySchema = z.object({
   // Metronome as a custom field so contracts can be joined back to HubSpot deals
   // for ARR reporting.
   hubspotDealId: z.string().optional(),
+  // Optional: when set, memberships that would otherwise stay on `none` after
+  // the seat remap (e.g. legacy members with no explicit seat) are moved onto
+  // this seat type, provided the new contract bills it. Used by the legacy →
+  // Business migration to promote every member to a paid seat (`pro` for a
+  // monthly switch, `pro_yearly` for a yearly one).
+  promoteNoneSeatsTo: z
+    .custom<MembershipSeatType>(isMembershipSeatType)
+    .optional(),
+  // Optional: when set, marks the (future-dated) contract for the legacy →
+  // Business credit migration. At `contract.start`, the webhook converts the
+  // workspace's remaining convertible legacy credits to AWU ($1 = 100 AWU) and
+  // grants this many free AWU per workspace member — computed then, so the
+  // amounts reflect the workspace's state at migration time. Stamped as the
+  // `LEGACY_CREDIT_MIGRATION_CUSTOM_FIELD_KEY` custom field on the contract.
+  legacyMigrationFreeAwuCreditsPerUser: z.number().int().min(0).optional(),
   seats: z
     .array(
       z.object({
@@ -190,6 +210,7 @@ function classifyPlanCode(planCode: string): MetronomePackageTier {
   }
   if (
     planCode === CREDIT_PRICED_BUSINESS_PLAN_CODE ||
+    planCode === CREDIT_PRICED_BUSINESS_LEGACY_LARGE_PLAN_CODE ||
     planCode === PRO_PLAN_SEAT_39_CODE
   ) {
     return "business";
@@ -968,6 +989,7 @@ async function stepSeatRemap({
   ownerLight,
   swapAt,
   alignedStart,
+  body,
 }: PostProvisionCtx): Promise<string | null> {
   const result = await remapMembershipSeatTypesForContract({
     metronomeCustomerId,
@@ -975,6 +997,7 @@ async function stepSeatRemap({
     workspace: ownerLight,
     swapAt,
     startingAt: alignedStart,
+    promoteNoneSeatType: body.promoteNoneSeatsTo,
   });
   if (result.isErr()) {
     return `seat_remap: ${result.error.message}`;
@@ -1100,6 +1123,17 @@ export async function switchContract({
   // Disable the internal seat sync — switchContract always runs its own
   // remap + sync at the end (after seat-rate overrides), so the contract sees
   // the final effective entitlements.
+  const additionalCustomFields: Record<string, string> = {};
+  if (body.hubspotDealId) {
+    additionalCustomFields[HUBSPOT_DEAL_ID_CUSTOM_FIELD_KEY] =
+      body.hubspotDealId;
+  }
+  if (body.legacyMigrationFreeAwuCreditsPerUser !== undefined) {
+    additionalCustomFields[LEGACY_CREDIT_MIGRATION_CUSTOM_FIELD_KEY] = String(
+      body.legacyMigrationFreeAwuCreditsPerUser
+    );
+  }
+
   const provisionResult = await provisionMetronomeContract({
     metronomeCustomerId,
     workspace: ownerLight,
@@ -1110,9 +1144,10 @@ export async function switchContract({
     planCode: body.planCode,
     fromContractId: currentSubscription?.metronomeContractId ?? undefined,
     enableSeatSync: false,
-    additionalCustomFields: body.hubspotDealId
-      ? { [HUBSPOT_DEAL_ID_CUSTOM_FIELD_KEY]: body.hubspotDealId }
-      : undefined,
+    additionalCustomFields:
+      Object.keys(additionalCustomFields).length > 0
+        ? additionalCustomFields
+        : undefined,
   });
   if (provisionResult.isErr()) {
     return new Err(

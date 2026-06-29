@@ -23,6 +23,7 @@ import {
   dispatchSeatBalanceResolved,
   syncPoolCreditStateFromBalance,
 } from "@app/lib/api/metronome/credit_state_dispatcher";
+import { applyLegacyCreditMigrationAtActivation } from "@app/lib/api/metronome/legacy_credit_migration";
 import { reconcileWorkspaceUserCreditStates } from "@app/lib/api/metronome/reconcile_credit_state";
 import { restoreWorkspaceAfterSubscription } from "@app/lib/api/subscription";
 import { ensureWorkOSOrganizationForPaidPlan } from "@app/lib/api/workos/organization";
@@ -64,6 +65,7 @@ import {
   fromFreeMetronomeUserId,
   getCreditTypeAwuId,
   getProductExcessCreditsId,
+  LEGACY_CREDIT_MIGRATION_CUSTOM_FIELD_KEY,
   PAYMENT_GATE_TYPE_CUSTOM_FIELD_KEY,
   PAYMENT_GATE_TYPE_SUBSCRIPTION_ACTIVATION,
   PLAN_CODE_CUSTOM_FIELD_KEY,
@@ -80,6 +82,7 @@ import { setUserNearLimit } from "@app/lib/metronome/user_block";
 import type { MetronomeWebhookEvent } from "@app/lib/metronome/webhook_events";
 import { PlanModel } from "@app/lib/models/plan";
 import { notifyUserAwuCapReached } from "@app/lib/notifications/workflows/user-awu-cap-reached";
+import { FREE_NO_PLAN_CODE } from "@app/lib/plans/plan_codes";
 import { CreditUsageConfigurationResource } from "@app/lib/resources/credit_usage_configuration_resource";
 import { MembershipResource } from "@app/lib/resources/membership_resource";
 import { ProgrammaticUsageConfigurationResource } from "@app/lib/resources/programmatic_usage_configuration_resource";
@@ -752,6 +755,50 @@ async function handlePerUserSpendThresholdEvent({
   }
 
   return new Ok(undefined);
+}
+
+// If the started contract was stamped for the legacy → Business migration,
+// convert the workspace's convertible legacy credits to AWU and grant the
+// per-user free bonus — computed now, so the amounts reflect the workspace's
+// state at activation. Shared by both `contract.start` swap paths (pending row
+// activation and immediate swap). Best-effort: failures are logged, never throw.
+async function applyStampedLegacyCreditMigration({
+  auth,
+  workspace,
+  contract,
+  metronomeCustomerId,
+  metronomeContractId,
+}: {
+  auth: Authenticator;
+  workspace: WorkspaceResource;
+  contract: {
+    custom_fields?: Record<string, string> | null;
+    starting_at: string;
+  };
+  metronomeCustomerId: string;
+  metronomeContractId: string;
+}): Promise<void> {
+  const stamped =
+    contract.custom_fields?.[LEGACY_CREDIT_MIGRATION_CUSTOM_FIELD_KEY];
+  if (stamped === undefined) {
+    return;
+  }
+  const freeAwuCreditsPerUser = Number.parseInt(stamped, 10);
+  if (!Number.isFinite(freeAwuCreditsPerUser)) {
+    logger.error(
+      { metronomeContractId, workspaceId: workspace.sId, stamped },
+      "[Metronome Webhook] contract.start: invalid legacy credit migration custom field, skipping credit migration"
+    );
+    return;
+  }
+  await applyLegacyCreditMigrationAtActivation({
+    auth,
+    workspace: renderLightWorkspaceType({ workspace }),
+    metronomeCustomerId,
+    metronomeContractId,
+    startingAt: new Date(contract.starting_at),
+    freeAwuCreditsPerUser,
+  });
 }
 
 export async function processMetronomeWebhook({
@@ -1547,17 +1594,10 @@ export async function processMetronomeWebhook({
 
       const activeSubscription =
         await SubscriptionResource.fetchActiveByWorkspaceModelId(workspace.id);
-      if (!activeSubscription) {
-        logger.warn(
-          { contractId, customerId, workspaceId: workspace.sId },
-          "[Metronome Webhook] contract.start: no active subscription"
-        );
-        break;
-      }
 
       // Idempotency: re-deliveries land here with the active subscription
       // already pointing at the new contract.
-      if (activeSubscription.metronomeContractId === contractId) {
+      if (activeSubscription?.metronomeContractId === contractId) {
         logger.info(
           { contractId, workspaceId: workspace.sId },
           "[Metronome Webhook] contract.start: subscription already swapped, skipping"
@@ -1577,13 +1617,22 @@ export async function processMetronomeWebhook({
         pendingSubscription &&
         pendingSubscription.status === "created_backend_only"
       ) {
-        const previousPlanCode = activeSubscription.getPlan().code;
+        const previousPlanCode =
+          activeSubscription?.getPlan().code ?? FREE_NO_PLAN_CODE;
         // `activatePending` flushes the contract cache itself.
         await pendingSubscription.activatePending();
         const auth = await Authenticator.internalAdminForWorkspace(
           workspace.sId
         );
         await restoreWorkspaceAfterSubscription(auth);
+
+        await applyStampedLegacyCreditMigration({
+          auth,
+          workspace,
+          contract: contractResult.value,
+          metronomeCustomerId: customerId,
+          metronomeContractId: contractId,
+        });
         await ensureWorkOSOrganizationForPaidPlan({
           workspace: renderLightWorkspaceType({ workspace }),
           planCode: targetPlan.code,
@@ -1606,42 +1655,69 @@ export async function processMetronomeWebhook({
         break;
       }
 
-      // Legacy fallback: no pending row was staged. Only swap when the
-      // workspace is Metronome-only billed, or not billed at all. Shadow
-      // billed subscriptions (Stripe + Metronome) follow Stripe's signal,
-      // and pure Stripe subs have no Metronome contract at all.
-      if (
-        !activeSubscription.isMetronomeOnlyBilled &&
-        activeSubscription.isBilled
-      ) {
+      // No pending row was staged (e.g. an immediate switch). Swap the active
+      // subscription onto the new contract regardless of its current billing
+      // rail — switchContract is used this way routinely. The ONLY contract we
+      // must NOT swap onto is a shadow contract: a Metronome contract that runs
+      // in parallel to a Stripe subscription with no billing-provider delivery
+      // (Stripe owns billing). That is a property of the contract itself — it has
+      // no `customer_billing_provider_configuration` — and only applies while the
+      // workspace is still Stripe-billed (so free / Metronome-only contracts,
+      // which also lack a delivery config, are not mistaken for shadows).
+      const startedContractIsShadow =
+        !contractResult.value.customer_billing_provider_configuration &&
+        !!activeSubscription?.stripeSubscriptionId;
+      if (startedContractIsShadow) {
         logger.info(
           {
             contractId,
             targetPlanCode,
             workspaceId: workspace.sId,
           },
-          "[Metronome Webhook] contract.start: subscription is not Metronome-only billed, leaving subscription alone"
+          "[Metronome Webhook] contract.start: shadow contract started, leaving subscription alone (Stripe drives billing)"
         );
         break;
       }
 
-      // End the current subscription as `ended_backend_only` and create
-      // a new active subscription on the target plan + new contract.
-      const legacyPreviousPlanCode = activeSubscription.getPlan().code;
-      // `swapMetronomeContract` flushes the contract cache itself.
-      await activeSubscription.swapMetronomeContract({
-        metronomeContractId: contractId,
-        planCode: targetPlan.code,
-      });
+      // Swap the active subscription onto the new contract, or — when the
+      // workspace has NO active subscription (e.g. it was cancelled and the
+      // `customer.subscription.deleted` webhook already ended the sub and
+      // scheduled a scrub, and this `contract.start` is the re-registration) —
+      // create the new subscription. Either way `restoreWorkspaceAfterSubscription`
+      // below cancels any scheduled scrub.
+      const previousPlanCode =
+        activeSubscription?.getPlan().code ?? FREE_NO_PLAN_CODE;
+      if (activeSubscription) {
+        // `swapMetronomeContract` flushes the contract cache itself.
+        await activeSubscription.swapMetronomeContract({
+          metronomeContractId: contractId,
+          planCode: targetPlan.code,
+        });
+      } else {
+        await SubscriptionResource.createActiveMetronomeSubscription({
+          workspaceModelId: workspace.id,
+          planCode: targetPlan.code,
+          metronomeContractId: contractId,
+        });
+      }
 
       // Cancel any scheduled scrub workflow, unpause connectors, re-enable
       // triggers. Idempotent — safe to call regardless of prior state.
       const auth = await Authenticator.internalAdminForWorkspace(workspace.sId);
       await restoreWorkspaceAfterSubscription(auth);
+
+      await applyStampedLegacyCreditMigration({
+        auth,
+        workspace,
+        contract: contractResult.value,
+        metronomeCustomerId: customerId,
+        metronomeContractId: contractId,
+      });
+
       emitSubscriptionChangedAuditEvent({
         auth,
         planCode: targetPlan.code,
-        previousPlanCode: legacyPreviousPlanCode,
+        previousPlanCode,
         metronomeContractId: contractId,
       });
 

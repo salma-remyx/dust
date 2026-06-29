@@ -460,6 +460,57 @@ describe("promoteNoneSeatTypesForContract", () => {
       })
     ).toEqual(["pro", "workspace_yearly"]);
   });
+
+  // `fallbackSeatType` — legacy contract migration: promote leftover `none`.
+  it("promotes every none member to the fallback when there is no commitment", () => {
+    expect(
+      promoteNoneSeatTypesForContract({
+        contract,
+        productSeatTypes,
+        seatTypes: ["none", "none"],
+        fallbackSeatType: "pro",
+      })
+    ).toEqual(["pro", "pro"]);
+  });
+
+  it("fills committed capacity first, then sends the rest to the fallback", () => {
+    const seatLimits = new Map<MembershipSeatType, SeatLimit>([
+      ["pro", { minSeats: 1, maxSeats: null }],
+    ]);
+    // 1 committed pro seat: first none fills it, the rest fall back to pro too.
+    expect(
+      promoteNoneSeatTypesForContract({
+        contract,
+        productSeatTypes,
+        seatTypes: ["none", "none", "none"],
+        seatLimits,
+        fallbackSeatType: "pro",
+      })
+    ).toEqual(["pro", "pro", "pro"]);
+  });
+
+  it("does not fall back to a seat type the contract does not bill", () => {
+    // `pro_yearly` is not on this monthly contract → no promotion.
+    expect(
+      promoteNoneSeatTypesForContract({
+        contract,
+        productSeatTypes,
+        seatTypes: ["none", "none"],
+        fallbackSeatType: "pro_yearly",
+      })
+    ).toEqual(["none", "none"]);
+  });
+
+  it("leaves non-none targets untouched when falling back", () => {
+    expect(
+      promoteNoneSeatTypesForContract({
+        contract,
+        productSeatTypes,
+        seatTypes: ["pro", "none", "free"],
+        fallbackSeatType: "pro",
+      })
+    ).toEqual(["pro", "pro", "free"]);
+  });
 });
 
 describe("classifySeatChange", () => {

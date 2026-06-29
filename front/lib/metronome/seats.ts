@@ -319,20 +319,39 @@ const PROMOTABLE_SEAT_TYPES: ReadonlySet<MembershipSeatType> = new Set([
   "workspace_yearly",
 ]);
 
+/**
+ * Promote `none` seat types onto paid seats the contract bills.
+ *
+ * Members on `none` are first placed into committed paid seats (`minSeats > 0`)
+ * with spare capacity, in ascending tier order — a committed seat is billed
+ * whether or not it is assigned, so filling it adds no cost.
+ *
+ * `fallbackSeatType` (used by a legacy contract migration) catches any `none`
+ * left over once committed capacity is exhausted: they are promoted onto that
+ * seat type, provided the contract bills it and it is promotable. With no
+ * committed capacity this promotes *every* member onto the fallback.
+ *
+ * Without a `fallbackSeatType`, the committed-only promotion is all-or-nothing:
+ * if a `none` member can't be placed into committed capacity, no member is
+ * promoted (the input is returned unchanged), so we never bill a partial set.
+ */
 export function promoteNoneSeatTypesForContract({
   contract,
   productSeatTypes,
   seatTypes,
   seatLimits,
+  fallbackSeatType,
 }: {
   contract: CachedContract;
   productSeatTypes: Map<string, MembershipSeatType>;
   seatTypes: MembershipSeatType[];
   seatLimits?: Map<MembershipSeatType, SeatLimit>;
+  fallbackSeatType?: MembershipSeatType;
 }): MembershipSeatType[] {
-  const committedPaidSeatTypes = [
-    ...getSeatSubscriptionsFromContract(contract, productSeatTypes).keys(),
-  ]
+  const onContract = new Set(
+    getSeatSubscriptionsFromContract(contract, productSeatTypes).keys()
+  );
+  const committedPaidSeatTypes = [...onContract]
     .filter(
       (seatType) =>
         PROMOTABLE_SEAT_TYPES.has(seatType) &&
@@ -341,6 +360,15 @@ export function promoteNoneSeatTypesForContract({
     .sort(
       (a, b) => SEAT_TYPE_ORDER[a] - SEAT_TYPE_ORDER[b] || a.localeCompare(b)
     );
+
+  // Resolve the fallback once: only a promotable seat the contract actually
+  // bills can catch leftover `none` members.
+  const fallbackTarget =
+    fallbackSeatType &&
+    PROMOTABLE_SEAT_TYPES.has(fallbackSeatType) &&
+    onContract.has(fallbackSeatType)
+      ? fallbackSeatType
+      : null;
 
   const assignedBySeatType = new Map<MembershipSeatType, number>();
   for (const seatType of seatTypes) {
@@ -368,11 +396,20 @@ export function promoteNoneSeatTypesForContract({
     const target = committedPaidSeatTypes.find(
       (seatType) => (remainingBySeatType.get(seatType) ?? 0) > 0
     );
-    if (!target) {
+    if (target) {
+      remainingBySeatType.set(
+        target,
+        (remainingBySeatType.get(target) ?? 0) - 1
+      );
+      result[i] = target;
+      continue;
+    }
+    // No committed capacity left: fall back to the migration default when one
+    // is set, otherwise preserve the all-or-nothing committed-promotion policy.
+    if (!fallbackTarget) {
       return [...seatTypes];
     }
-    remainingBySeatType.set(target, (remainingBySeatType.get(target) ?? 0) - 1);
-    result[i] = target;
+    result[i] = fallbackTarget;
   }
   return result;
 }
@@ -397,6 +434,13 @@ export function promoteNoneSeatTypesForContract({
  * `promoteNoneSeatTypesForContract`): a committed seat is billed whether or not
  * it is assigned, so filling it with an otherwise seat-less member adds no cost.
  *
+ * When `promoteNoneSeatType` is set, members that would otherwise stay on
+ * `none` (e.g. legacy members with no explicit seat) are instead moved onto
+ * that seat type, provided the new contract bills it. This is how a legacy
+ * contract migration promotes every member to a paid seat (e.g. `pro` for a
+ * monthly switch, `pro_yearly` for a yearly one); it takes precedence over the
+ * committed-spare promotion above.
+ *
  * No-op for memberships already on a covered seat type. A membership with no
  * resolvable `UserResource` is logged and skipped; a DB error while applying a
  * change throws (internal error → 500), so the operator knows the remap was
@@ -409,6 +453,7 @@ export async function remapMembershipSeatTypesForContract({
   swapAt,
   startingAt,
   contract,
+  promoteNoneSeatType,
 }: {
   metronomeCustomerId: string;
   contractId: string;
@@ -416,6 +461,7 @@ export async function remapMembershipSeatTypesForContract({
   swapAt: "current-hour" | "next-hour";
   startingAt: Date;
   contract?: CachedContract;
+  promoteNoneSeatType?: MembershipSeatType;
 }): Promise<Result<undefined, Error>> {
   let resolvedContract: CachedContract;
   if (contract) {
@@ -522,6 +568,7 @@ export async function remapMembershipSeatTypesForContract({
     productSeatTypes,
     seatTypes: remapTargets.map((t) => t.baseTarget),
     seatLimits,
+    fallbackSeatType: promoteNoneSeatType,
   });
 
   for (const [
