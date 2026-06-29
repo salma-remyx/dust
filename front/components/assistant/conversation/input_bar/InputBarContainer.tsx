@@ -136,6 +136,7 @@ export const INPUT_BAR_ACTIONS = [
   "attachment",
   "agents-list",
   "agents-list-with-actions",
+  "model-picker",
   "turn-into-agent",
   "voice",
   "fullscreen",

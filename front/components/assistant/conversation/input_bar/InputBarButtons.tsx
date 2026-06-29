@@ -248,16 +248,13 @@ export const InputBarButtons = React.memo(function InputBarButtons({
         />
       </>
     );
-  // The picker preselects the model configured on the selected agent. Resolve
-  // its full config from `allAgents` (the rich mention only carries the sId).
+
   const selectedAgentModel =
     (selectedAgent &&
       allAgents.find((a) => a.sId === selectedAgent.id)?.model) ??
     null;
 
-  // Gated behind the `models_picker` feature flag (handled inside the
-  // component, which renders null when the flag is off).
-  const modelPickerButton = (
+  const modelPickerButton = actions.includes("model-picker") && (
     <InputBarModelPicker
       agentModel={selectedAgentModel}
       owner={owner}
