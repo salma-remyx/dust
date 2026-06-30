@@ -1456,6 +1456,12 @@ export const QUERIES: LabeledQuery[] = [
     expected: "common_utilities.set_conversation_title",
   },
 
+  // --- databricks ---
+  {
+    query: "list the SQL warehouses in my Databricks workspace",
+    expected: "databricks.list_warehouses",
+  },
+
   // --- cross-server (no platform named) ---
   {
     query: "create a support ticket",
