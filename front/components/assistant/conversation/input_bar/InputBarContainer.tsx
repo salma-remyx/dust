@@ -1428,6 +1428,17 @@ const InputBarContainer = ({
         )}
         aria-hidden={isCompact}
         onClick={(e) => {
+          const selection = window.getSelection();
+          const editorDom = editorRef.current?.view.dom;
+          if (
+            selection &&
+            !selection.isCollapsed &&
+            editorDom &&
+            selection.anchorNode &&
+            editorDom.contains(selection.anchorNode)
+          ) {
+            return;
+          }
           // If e.target is not a child of a div with class "tiptap", then focus on the editor
           if (
             !(e.target instanceof HTMLElement && e.target.closest(".tiptap"))
