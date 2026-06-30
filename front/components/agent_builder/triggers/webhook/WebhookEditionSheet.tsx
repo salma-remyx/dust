@@ -78,7 +78,6 @@ function WebhookEditionStatusToggle({
       <div className="flex flex-row items-center gap-2">
         <span className="w-16">{isEnabled ? "Enabled" : "Disabled"}</span>
         <SliderToggle
-          size="xs"
           disabled={!isEditor}
           selected={isEnabled}
           onClick={() => setStatus(isEnabled ? "disabled" : "enabled")}
@@ -206,7 +205,6 @@ function WebhookEditionIncludePayload({
   return (
     <div className="flex items-center gap-2">
       <Checkbox
-        size="sm"
         checked={includePayload}
         onClick={() => setIncludePayload(!includePayload)}
         disabled={!isEditor}

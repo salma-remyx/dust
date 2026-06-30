@@ -232,7 +232,7 @@ function TaskUpdateRow({
   return (
     <div className="flex items-start gap-3 px-3 py-3">
       <div className="mt-0.5 shrink-0">
-        <Checkbox size="xs" checked={isDone} disabled />
+        <Checkbox checked={isDone} disabled />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className="flex flex-wrap items-start gap-2">

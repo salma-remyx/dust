@@ -608,7 +608,6 @@ export function EnvironmentSection() {
                       </span>
                     </div>
                     <SliderToggle
-                      size="sm"
                       selected={kindField.value === "https_secret"}
                       disabled={isUpsertingWorkspaceSandboxEnvVar}
                       onClick={() => {

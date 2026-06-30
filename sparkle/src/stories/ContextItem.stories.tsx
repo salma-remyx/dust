@@ -105,7 +105,7 @@ export const ListItemExample = () => (
       <ContextItem
         title="Github"
         subElement={<>By: Stan</>}
-        action={<SliderToggle size="xs" />}
+        action={<SliderToggle />}
         visual={<ContextItem.Visual visual={GithubLogo} />}
       >
         <>
@@ -117,12 +117,9 @@ export const ListItemExample = () => (
       </ContextItem>
       <ContextItem
         title="@Gpt4"
-        action={<SliderToggle size="xs" />}
+        action={<SliderToggle />}
         visual={
-          <Avatar
-            visual="https://dust.tt/static/systemavatar/gpt4_avatar_full.png"
-            size="sm"
-          />
+          <Avatar visual="https://dust.tt/static/systemavatar/gpt4_avatar_full.png" />
         }
       >
         <ContextItem.Description description="Lats, pricing, history of contacts, contact message" />

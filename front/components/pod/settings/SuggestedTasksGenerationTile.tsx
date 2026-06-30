@@ -160,7 +160,6 @@ export function SuggestedTasksGenerationTile({
           trigger={
             <div>
               <SliderToggle
-                size="xs"
                 selected={pod.todoGenerationEnabled}
                 disabled={sliderDisabled}
                 onClick={onToggleClick}
