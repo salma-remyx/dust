@@ -408,7 +408,7 @@ describe("filterEnabledModels", () => {
     const workspace = await WorkspaceFactory.basic();
     const auth = await Authenticator.internalAdminForWorkspace(workspace.sId);
     const model = createMockModel({
-      providerId: "togetherai",
+      providerId: "fireworks",
       largeModel: false,
     });
 
