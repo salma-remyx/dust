@@ -316,6 +316,7 @@ const QUERIES: LabeledQuery[] = [
   {
     query: "log a bug in jira for this regression",
     expected: "jira.create_issue",
+    maxRank: 2, // "log" collides with monday.get_activity_logs
   },
   {
     query: "raise a jira ticket for the broken login",
@@ -682,6 +683,7 @@ const QUERIES: LabeledQuery[] = [
   {
     query: "remind me tomorrow morning to check the launch",
     expected: "wakeups.schedule_wakeup",
+    maxRank: 3, // "check" collides with outlook_calendar.check_self_availability
   },
   {
     query: "check back in 2 hours to see if the import finished",
