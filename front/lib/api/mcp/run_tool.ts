@@ -21,6 +21,12 @@ import { getExitOrPauseEvents } from "@app/lib/actions/mcp_internal_actions/exit
 import { hideFileFromActionOutput } from "@app/lib/actions/mcp_utils";
 import type { AgentLoopRunContextType } from "@app/lib/actions/types";
 import { handleMCPActionError } from "@app/lib/api/mcp/error";
+import {
+  TOOL_CALL_VERIFICATION_ENABLED,
+  verifyToolCall,
+  type ToolCallVerificationOptions,
+  type ToolCallVerificationResult,
+} from "@app/lib/api/mcp/tool_call_verification";
 import type { Authenticator } from "@app/lib/auth";
 import type { AgentMCPActionOutputItemModel } from "@app/lib/models/agent/actions/mcp";
 import type { AgentMCPActionResource } from "@app/lib/resources/agent_mcp_action_resource";
@@ -178,6 +184,29 @@ export async function* runToolWithStreaming(
   const endDate = performance.now();
   await action.markAsSucceeded({ executionDurationMs: endDate - startDate });
 
+  // Continuous-score verification of the completed tool call (LLM-as-a-Verifier,
+  // arxiv:2607.05391). Gated + fire-and-forget; never blocks or alters the forward path.
+  if (TOOL_CALL_VERIFICATION_ENABLED) {
+    void verifyCompletedToolCall({
+      toolConfiguration,
+      inputs,
+      toolCallResult,
+      userMessage,
+      agentConfiguration,
+    })
+      .then((result) => {
+        if (result.score !== null) {
+          localLogger.info(
+            { verificationScore: result.score, grade: result.grade },
+            "MCP tool call verification score"
+          );
+        }
+      })
+      .catch((err) => {
+        localLogger.error({ err }, "MCP tool call verification failed");
+      });
+  }
+
   yield {
     type: "tool_success",
     created: Date.now(),
@@ -193,4 +222,31 @@ export async function* runToolWithStreaming(
       generatedFiles,
     },
   };
+}
+
+/** Structural view of a completed tool call (accepts Dust action types, easy to stub in tests). */
+export interface ToolCallVerificationArgs {
+  toolConfiguration: { originalName: string; description?: string };
+  inputs: Record<string, unknown> | undefined;
+  toolCallResult: { content: unknown };
+  userMessage: unknown;
+  agentConfiguration: { name: string };
+}
+
+/** LLM-as-a-Verifier (arxiv:2607.05391): maps a completed tool call to a continuous score. */
+export function verifyCompletedToolCall(
+  args: ToolCallVerificationArgs,
+  options?: ToolCallVerificationOptions
+): Promise<ToolCallVerificationResult> {
+  return verifyToolCall(
+    {
+      toolName: args.toolConfiguration.originalName,
+      toolDescription: args.toolConfiguration.description,
+      toolInput: args.inputs,
+      toolResult: args.toolCallResult.content,
+      userMessage: args.userMessage,
+      agentName: args.agentConfiguration.name,
+    },
+    options
+  );
 }
