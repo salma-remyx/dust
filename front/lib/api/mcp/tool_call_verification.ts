@@ -1,6 +1,5 @@
-import { z } from "zod";
-
 import { assertNever } from "@app/types/shared/utils/assert_never";
+import { z } from "zod";
 
 /**
  * Continuous-score verification for completed MCP tool calls.
@@ -14,13 +13,16 @@ import { assertNever } from "@app/types/shared/utils/assert_never";
  * computes the verification score as the expectation over the distribution of
  * *scoring-token logits* in a single forward pass. Dust's LLM layer does not
  * expose token logprobs, so that exact mechanism cannot be ported here. We
- * instead obtain the continuous score from the paper's *other* two scaling
- * axes, which it shows independently improve verification and which do not
- * depend on logits:
+ * instead obtain the continuous score from the paper's *other* scaling axes,
+ * which it shows independently improve verification and which do not depend on
+ * logits:
  *   - score granularity: an ordered set of verdict grades (finer than yes/no),
  *     each weighted in [0, 1];
  *   - repeated evaluation: sampling N judge passes and aggregating, which the
- *     paper credits with variance reduction.
+ *     paper credits with variance reduction;
+ *   - criteria decomposition: verifying C focused criteria independently (one
+ *     judge pass per criterion) and averaging, which the paper credits with
+ *     complexity reduction.
  *
  * The live LLM judge call is an injectable dependency (`JudgeVerdictFn`); the
  * production wiring in `runToolWithStreaming` gates it off by default until a
@@ -120,10 +122,13 @@ export interface ToolCallVerificationInput {
 
 /** Builds the prompt handed to the verifier judge. Pure. */
 export function buildVerificationPrompt(
-  input: ToolCallVerificationInput
+  input: ToolCallVerificationInput,
+  criterion?: string
 ): string {
   return [
-    "You are verifying whether an MCP tool call executed correctly for an agentic task.",
+    criterion
+      ? "You are verifying whether an MCP tool call satisfies one specific correctness criterion."
+      : "You are verifying whether an MCP tool call executed correctly for an agentic task.",
     "Given the tool, its inputs, and the result it returned, decide how correct the",
     "execution is. Respond with exactly one grade on the first line, optionally",
     "followed by a one-line rationale.",
@@ -134,6 +139,13 @@ export function buildVerificationPrompt(
     "- partially_correct",
     "- incorrect",
     "",
+    ...(criterion
+      ? [
+          `Criterion: ${criterion}`,
+          "Grade the tool call ONLY against this criterion.",
+          "",
+        ]
+      : []),
     `Tool: ${input.toolName}`,
     ...(input.toolDescription
       ? [`Description: ${truncate(input.toolDescription, 500)}`]
@@ -223,6 +235,18 @@ export interface ToolCallVerificationOptions {
   judge?: JudgeVerdictFn;
   /** Number of independent judge passes (repeated-evaluation scaling). */
   samples?: number;
+  /**
+   * Criteria decomposition (the paper's third scaling axis): each criterion is
+   * verified with its own focused prompt and the per-criterion grades are
+   * averaged, reducing the complexity of each individual judgment.
+   */
+  criteria?: string[];
+}
+
+/** Per-criterion breakdown entry produced by criteria decomposition. */
+export interface CriterionScore {
+  criterion: string;
+  score: number;
 }
 
 export interface ToolCallVerificationResult {
@@ -232,12 +256,15 @@ export interface ToolCallVerificationResult {
   confidence: number | null;
   grade: ToolCallVerificationGrade | null;
   sampleCount: number;
+  /** Per-criterion scores, present only when `criteria` decomposition is used. */
+  criteriaScores?: CriterionScore[];
 }
 
 /**
  * Verifies a completed tool call, returning a continuous score aggregated from
- * `samples` judge passes. With no `judge` provided this is a safe no-op that
- * returns a null score, so the call site can invoke it unconditionally.
+ * `samples` judge passes (optionally decomposed over `criteria`). With no
+ * `judge` provided this is a safe no-op that returns a null score, so the call
+ * site can invoke it unconditionally.
  */
 export async function verifyToolCall(
   input: ToolCallVerificationInput,
@@ -245,16 +272,68 @@ export async function verifyToolCall(
 ): Promise<ToolCallVerificationResult> {
   const judge = options?.judge;
   if (!judge) {
-    return {
-      score: null,
-      variance: null,
-      confidence: null,
-      grade: null,
-      sampleCount: 0,
-    };
+    return nullVerificationResult();
   }
   const samples = Math.max(1, options?.samples ?? 1);
-  const prompt = buildVerificationPrompt(input);
+  const criteria = (options?.criteria ?? []).filter(
+    (criterion) => criterion.trim().length > 0
+  );
+
+  if (criteria.length === 0) {
+    const grades = await collectGrades(
+      judge,
+      buildVerificationPrompt(input),
+      samples
+    );
+    if (grades.length === 0) {
+      return nullVerificationResult();
+    }
+    const { score, variance } = expectationScore(grades);
+    return {
+      score,
+      variance,
+      confidence: confidence(score, variance),
+      grade: modalGrade(grades),
+      sampleCount: grades.length,
+    };
+  }
+
+  // Criteria decomposition: one focused verification per criterion, then the
+  // average across criteria and repetitions (the paper's R = (1/CK) sum).
+  const allGrades: ToolCallVerificationGrade[] = [];
+  const criteriaScores: CriterionScore[] = [];
+  for (const criterion of criteria) {
+    const grades = await collectGrades(
+      judge,
+      buildVerificationPrompt(input, criterion),
+      samples
+    );
+    if (grades.length === 0) {
+      continue;
+    }
+    criteriaScores.push({ criterion, score: expectationScore(grades).score });
+    allGrades.push(...grades);
+  }
+  if (allGrades.length === 0) {
+    return nullVerificationResult();
+  }
+  const { score, variance } = expectationScore(allGrades);
+  return {
+    score,
+    variance,
+    confidence: confidence(score, variance),
+    grade: modalGrade(allGrades),
+    sampleCount: allGrades.length,
+    criteriaScores,
+  };
+}
+
+/** Runs `samples` judge passes on `prompt`, keeping the parseable grades. */
+async function collectGrades(
+  judge: JudgeVerdictFn,
+  prompt: string,
+  samples: number
+): Promise<ToolCallVerificationGrade[]> {
   const grades: ToolCallVerificationGrade[] = [];
   for (let i = 0; i < samples; i++) {
     const grade = parseGrade(await judge(prompt));
@@ -262,22 +341,16 @@ export async function verifyToolCall(
       grades.push(grade);
     }
   }
-  if (grades.length === 0) {
-    return {
-      score: null,
-      variance: null,
-      confidence: null,
-      grade: null,
-      sampleCount: 0,
-    };
-  }
-  const { score, variance } = expectationScore(grades);
+  return grades;
+}
+
+function nullVerificationResult(): ToolCallVerificationResult {
   return {
-    score,
-    variance,
-    confidence: confidence(score, variance),
-    grade: modalGrade(grades),
-    sampleCount: grades.length,
+    score: null,
+    variance: null,
+    confidence: null,
+    grade: null,
+    sampleCount: 0,
   };
 }
 

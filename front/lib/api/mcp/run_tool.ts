@@ -23,9 +23,9 @@ import type { AgentLoopRunContextType } from "@app/lib/actions/types";
 import { handleMCPActionError } from "@app/lib/api/mcp/error";
 import {
   TOOL_CALL_VERIFICATION_ENABLED,
-  verifyToolCall,
   type ToolCallVerificationOptions,
   type ToolCallVerificationResult,
+  verifyToolCall,
 } from "@app/lib/api/mcp/tool_call_verification";
 import type { Authenticator } from "@app/lib/auth";
 import type { AgentMCPActionOutputItemModel } from "@app/lib/models/agent/actions/mcp";
@@ -197,7 +197,12 @@ export async function* runToolWithStreaming(
       .then((result) => {
         if (result.score !== null) {
           localLogger.info(
-            { verificationScore: result.score, grade: result.grade },
+            {
+              verificationScore: result.score,
+              verificationConfidence: result.confidence,
+              grade: result.grade,
+              criteriaScores: result.criteriaScores,
+            },
             "MCP tool call verification score"
           );
         }

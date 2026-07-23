@@ -1,5 +1,3 @@
-import { describe, expect, it } from "vitest";
-
 // Imports the call-site module (NON-NEW) to prove the wiring in run_tool.ts
 // actually delegates into the verification capability.
 import { verifyCompletedToolCall } from "@app/lib/api/mcp/run_tool";
@@ -12,9 +10,10 @@ import {
   parseGrade,
   rankCandidates,
   selectBestCandidate,
-  verifyToolCall,
   type ToolCallVerificationGrade,
+  verifyToolCall,
 } from "@app/lib/api/mcp/tool_call_verification";
+import { describe, expect, it } from "vitest";
 
 describe("verifyCompletedToolCall (LLM-as-a-Verifier wiring)", () => {
   it("returns a continuous score aggregated from the judge's graded verdicts", async () => {
@@ -162,5 +161,84 @@ describe("buildVerificationPrompt", () => {
     expect(prompt).toContain("- mostly_correct");
     expect(prompt).toContain("- incorrect");
     expect(prompt).toContain("Grade:");
+  });
+});
+
+describe("criteria decomposition (complexity-reduction axis)", () => {
+  it("runs one focused judge pass per criterion and averages per-criterion scores", async () => {
+    const prompts: string[] = [];
+    const result = await verifyToolCall(
+      { toolName: "calc", toolInput: { expr: "1+1" }, toolResult: "2" },
+      {
+        judge: async (p) => {
+          prompts.push(p);
+          return p.includes("Criterion: arithmetic accuracy")
+            ? "correct"
+            : "partially_correct";
+        },
+        samples: 2,
+        criteria: ["arithmetic accuracy", "result formatting"],
+      }
+    );
+
+    // 2 criteria x 2 repeated evaluations.
+    expect(prompts).toHaveLength(4);
+    expect(prompts[0]).toContain("Criterion: arithmetic accuracy");
+    expect(prompts[2]).toContain("Criterion: result formatting");
+    // Per-criterion scores 1 and 0.4 average to 0.7 across criteria x samples.
+    expect(result.score).toBe(0.7);
+    expect(result.sampleCount).toBe(4);
+    expect(result.criteriaScores).toEqual([
+      { criterion: "arithmetic accuracy", score: 1 },
+      { criterion: "result formatting", score: 0.4 },
+    ]);
+  });
+
+  it("scopes the prompt to the single criterion being verified", () => {
+    const prompt = buildVerificationPrompt(
+      { toolName: "search", toolResult: "ok" },
+      "result relevance"
+    );
+
+    expect(prompt).toContain("Criterion: result relevance");
+    expect(prompt).toContain("ONLY against this criterion");
+    expect(prompt).toContain("Tool: search");
+  });
+
+  it("returns a null score when every criterion verdict is unparseable", async () => {
+    const result = await verifyToolCall(
+      { toolName: "t" },
+      { judge: async () => "garbage", samples: 2, criteria: ["a", "b"] }
+    );
+
+    expect(result.score).toBeNull();
+    expect(result.sampleCount).toBe(0);
+  });
+
+  it("decomposes verification through the run_tool call-site wrapper", async () => {
+    const result = await verifyCompletedToolCall(
+      {
+        toolConfiguration: { originalName: "search" },
+        inputs: { q: "capital of France" },
+        toolCallResult: {
+          content: [{ type: "text", text: "The capital is Paris" }],
+        },
+        userMessage: { content: "what is the capital of France?" },
+        agentConfiguration: { name: "geo-bot" },
+      },
+      {
+        // The judge grades semantic entailment, so paraphrase-equivalent
+        // results ("Paris is the capital" vs "The capital is Paris") verify
+        // without any string-equality check.
+        judge: async () => "correct",
+        samples: 2,
+        criteria: ["factual accuracy"],
+      }
+    );
+
+    expect(result.score).toBe(1);
+    expect(result.criteriaScores).toEqual([
+      { criterion: "factual accuracy", score: 1 },
+    ]);
   });
 });
