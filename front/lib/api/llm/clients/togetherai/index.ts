@@ -20,6 +20,7 @@ import {
 } from "@app/lib/api/llm/utils/openai_like/chat/conversation_to_openai";
 import { streamLLMEvents } from "@app/lib/api/llm/utils/openai_like/chat/openai_to_events";
 import { handleError } from "@app/lib/api/llm/utils/openai_like/errors";
+import { lastUserQuery } from "@app/lib/api/llm/utils/openai_like/tool_gating";
 import type { Authenticator } from "@app/lib/auth";
 import assert from "assert";
 import { APIError, OpenAI } from "openai";
@@ -52,7 +53,9 @@ export class TogetheraiLLM extends LLM<ChatCompletionCreateParamsStreaming> {
     forceToolCall,
   }: LLMStreamParameters): ChatCompletionCreateParamsStreaming {
     const tools =
-      specifications.length > 0 ? toTools(specifications) : undefined;
+      specifications.length > 0
+        ? toTools(specifications, lastUserQuery(conversation), forceToolCall)
+        : undefined;
 
     return {
       model: this.modelId,

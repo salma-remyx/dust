@@ -19,6 +19,8 @@ import type {
 } from "openai/resources/chat/completions";
 import type { ResponseFormatJSONSchema } from "openai/resources/shared";
 
+import { gateSpecifications } from "../tool_gating";
+
 type ChatCompletionContentPart =
   | ChatCompletionContentPartText
   | ChatCompletionContentPartImage;
@@ -150,9 +152,22 @@ export function toMessages(
 }
 
 export function toTools(
-  specifications: AgentActionSpecification[]
+  specifications: AgentActionSpecification[],
+  query?: string,
+  forceToolCall?: string
 ): ChatCompletionTool[] {
-  return specifications.map((tool) => {
+  // Dynamic tool gating (arXiv:2604.21816): when a per-turn query is available,
+  // keep the deferred tools whose name/description/schema match this turn's
+  // intent and drop the rest, so the OpenAI-like providers — which lack a native
+  // deferred-loading primitive — do not serialize every tool schema every turn
+  // (the "Tools Tax"). With no query, behavior is identical to before: every
+  // specification is serialized.
+  const gated =
+    query && query.trim()
+      ? gateSpecifications(specifications, query, { forceToolCall })
+      : specifications;
+
+  return gated.map((tool) => {
     const properties = tool.inputSchema.properties ?? {};
     const parameters: {
       type: "object";
