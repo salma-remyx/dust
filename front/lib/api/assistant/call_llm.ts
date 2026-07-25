@@ -1,10 +1,13 @@
 import { getStreamLLM } from "@app/lib/api/llm";
+import type { FailoverCandidate } from "@app/lib/api/llm/failover_stream";
+import { streamWithFailover } from "@app/lib/api/llm/failover_stream";
 import type { LLMTraceContext } from "@app/lib/api/llm/traces/types";
 import type { LLMStreamParameters } from "@app/lib/api/llm/types/options";
 import { getLlmCredentials } from "@app/lib/api/provider_credentials";
 import type { Authenticator } from "@app/lib/auth";
 import type { ModelProviderIdType } from "@app/lib/resources/storage/models/workspace";
 import type { ModelIdType } from "@app/types/assistant/models/types";
+import type { LLMCredentialsType } from "@app/types/provider_credential";
 import type { Result } from "@app/types/shared/result";
 import { Err, Ok } from "@app/types/shared/result";
 import { z } from "zod";
@@ -16,6 +19,11 @@ export interface LLMConfig {
   temperature?: number;
   useCache?: boolean;
   useStream?: boolean;
+  // Ordered fallback model ids. On an early retryable failure of `modelId`,
+  // the conversation in `input` is forwarded verbatim to each fallback in turn
+  // (History-Forwarding), preserving continuity across providers. Empty/absent
+  // leaves behavior identical to a single-provider stream.
+  fallbackModelIds?: ModelIdType[];
 }
 
 export interface LLMOptions {
@@ -69,10 +77,21 @@ export async function runMultiActionsAgent(
 
   await options.onRunId?.(llm.getTraceId());
 
+  // History-Forwarding failover chain: primary first, then any configured
+  // fallbacks. On an early retryable failure the conversation in `input` is
+  // forwarded verbatim to the next provider, preserving continuity.
+  const fallbacks = await buildFallbackLLMs(
+    auth,
+    credentials,
+    config,
+    options.context
+  );
+  const candidates: FailoverCandidate[] = [llm, ...fallbacks];
+
   const actions: NonNullable<LLMOutput["actions"]> = [];
   let generation = "";
 
-  for await (const event of llm.stream(input)) {
+  for await (const event of streamWithFailover(candidates, input)) {
     if (event.type === "error") {
       return new Err(new Error(`LLM error: ${event.content.message}`));
     }
@@ -91,4 +110,28 @@ export async function runMultiActionsAgent(
   }
 
   return new Ok({ actions, generation });
+}
+
+// Resolves the configured fallback LLMs. Kept sequential (rather than
+// `Promise.all`) because each `getStreamLLM` call may touch the auth/feature-
+// flag layer, and the fallback chain is expected to stay small (1–2 entries).
+async function buildFallbackLLMs(
+  auth: Authenticator,
+  credentials: LLMCredentialsType,
+  config: LLMConfig,
+  context?: LLMTraceContext
+): Promise<FailoverCandidate[]> {
+  const fallbacks: FailoverCandidate[] = [];
+  for (const modelId of config.fallbackModelIds ?? []) {
+    const fallback = await getStreamLLM(auth, {
+      credentials,
+      modelId,
+      temperature: config.temperature,
+      context,
+    });
+    if (fallback) {
+      fallbacks.push(fallback);
+    }
+  }
+  return fallbacks;
 }
