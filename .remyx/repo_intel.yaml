@@ -25,6 +25,18 @@ observed_landing_zones:
     branch: tool-attention-is-all-you-need-dynamic-tool-gating-and-lazy-
     timestamp: '2026-07-25T03:56:12Z'
   last_observed: '2026-07-25T03:56:12Z'
+- path: front/lib/api/llm/
+  shape_tags:
+  - unclassified
+  confirmed_by:
+  - arxiv: 2607.15899v1
+    mode: Mode 2 (adapted port)
+    call_site_specifics: "`runMultiActionsAgent` in `front/lib/api/assistant/call_llm.ts`\
+      \ \u2014 the previous `for await (const event of llm.stream(input))` loop was\
+      \ replaced by `for await (const event of streamWithFailover(candida"
+    branch: continuitybench-a-benchmark-and-systems-study-of-stateful-fa
+    timestamp: '2026-07-25T22:45:31Z'
+  last_observed: '2026-07-25T22:45:31Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -35,4 +47,4 @@ rejected_shapes:
   - arxiv: 2407.03618v1
     timestamp: '2026-07-24T10:27:15Z'
 coordination_signals: []
-last_updated: '2026-07-25T03:56:12Z'
+last_updated: '2026-07-25T22:45:31Z'
