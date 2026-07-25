@@ -13,6 +13,18 @@ observed_landing_zones:
     branch: llm-as-a-verifier-a-general-purpose-verification-framework
     timestamp: '2026-07-22T21:45:25Z'
   last_observed: '2026-07-22T21:45:25Z'
+- path: front/lib/api/llm/utils/openai_like/chat/
+  shape_tags:
+  - unclassified
+  confirmed_by:
+  - arxiv: 2604.21816v1
+    mode: Mode 2 (adapted port)
+    call_site_specifics: FireworksLLM.buildStreamRequestPayload and TogetheraiLLM.buildStreamRequestPayload
+      (front/lib/api/llm/clients/fireworks and togetherai), which now pass lastUserQuery(conversation)
+      into the shared toTo
+    branch: tool-attention-is-all-you-need-dynamic-tool-gating-and-lazy-
+    timestamp: '2026-07-25T03:56:12Z'
+  last_observed: '2026-07-25T03:56:12Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -23,4 +35,4 @@ rejected_shapes:
   - arxiv: 2407.03618v1
     timestamp: '2026-07-24T10:27:15Z'
 coordination_signals: []
-last_updated: '2026-07-24T10:27:15Z'
+last_updated: '2026-07-25T03:56:12Z'
