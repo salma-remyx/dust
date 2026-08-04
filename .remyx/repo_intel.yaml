@@ -37,6 +37,18 @@ observed_landing_zones:
     branch: continuitybench-a-benchmark-and-systems-study-of-stateful-fa
     timestamp: '2026-07-25T22:45:31Z'
   last_observed: '2026-07-25T22:45:31Z'
+- path: front/types/assistant/models/
+  shape_tags:
+  - unclassified
+  confirmed_by:
+  - arxiv: 2607.24653v1
+    mode: Mode 2 (adapted port)
+    call_site_specifics: 'Existing LLM stream router: getStreamEndpoints() / getStreamEndpointLLM
+      in front/lib/api/llm/index.ts (iterates DUST_STREAM_ENDPOINTS), plus the model
+      catalog SUPPORTED_MODEL_CONFIGS consumed by front'
+    branch: kimi-k3-open-frontier-intelligence
+    timestamp: '2026-08-04T20:43:23Z'
+  last_observed: '2026-08-04T20:43:23Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -47,4 +59,4 @@ rejected_shapes:
   - arxiv: 2407.03618v1
     timestamp: '2026-07-24T10:27:15Z'
 coordination_signals: []
-last_updated: '2026-07-25T22:45:31Z'
+last_updated: '2026-08-04T20:43:23Z'
