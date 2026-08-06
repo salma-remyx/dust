@@ -12,7 +12,14 @@ observed_landing_zones:
       behind TOOL_CALL_VERIFICATION_ENABLED; runToolWithStreami
     branch: llm-as-a-verifier-a-general-purpose-verification-framework
     timestamp: '2026-07-22T21:45:25Z'
-  last_observed: '2026-07-22T21:45:25Z'
+  - arxiv: 2507.19880v1
+    mode: Mode 2 (adapted port)
+    call_site_specifics: "buildToolConfigurationsFromRawTools in front/lib/actions/mcp_actions.ts\
+      \ (pre-existing) \u2014 the trojan scan runs on every non-internal remote server's\
+      \ raw tool list immediately before stake assignment; t"
+    branch: trivial-trojans-how-minimal-mcp-servers-enable-cross-tool-ex
+    timestamp: '2026-08-06T05:55:16Z'
+  last_observed: '2026-08-06T05:55:16Z'
 - path: front/lib/api/llm/utils/openai_like/chat/
   shape_tags:
   - unclassified
@@ -59,4 +66,4 @@ rejected_shapes:
   - arxiv: 2407.03618v1
     timestamp: '2026-07-24T10:27:15Z'
 coordination_signals: []
-last_updated: '2026-08-04T20:43:23Z'
+last_updated: '2026-08-06T05:55:16Z'
