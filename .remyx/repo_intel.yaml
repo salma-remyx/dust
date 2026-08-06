@@ -50,12 +50,12 @@ observed_landing_zones:
   confirmed_by:
   - arxiv: 2607.24653v1
     mode: Mode 2 (adapted port)
-    call_site_specifics: 'Existing LLM stream router: getStreamEndpoints() / getStreamEndpointLLM
-      in front/lib/api/llm/index.ts (iterates DUST_STREAM_ENDPOINTS), plus the model
-      catalog SUPPORTED_MODEL_CONFIGS consumed by front'
-    branch: kimi-k3-open-frontier-intelligence
-    timestamp: '2026-08-04T20:43:23Z'
-  last_observed: '2026-08-04T20:43:23Z'
+    call_site_specifics: Registered into the existing model catalog (SUPPORTED_MODEL_CONFIGS
+      / STATIC_MODEL_IDS, consumed by the model-selection helpers in front/types/assistant/assistant.ts)
+      and the Fireworks client whitelis
+    branch: kimi-k3-open-frontier-intelligence-v2
+    timestamp: '2026-08-06T21:48:35Z'
+  last_observed: '2026-08-06T21:48:35Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -66,4 +66,4 @@ rejected_shapes:
   - arxiv: 2407.03618v1
     timestamp: '2026-07-24T10:27:15Z'
 coordination_signals: []
-last_updated: '2026-08-06T05:55:16Z'
+last_updated: '2026-08-06T21:48:35Z'
