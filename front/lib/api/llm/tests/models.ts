@@ -27,6 +27,7 @@ import {
   FIREWORKS_GLM_5P2_MODEL_ID,
   FIREWORKS_KIMI_K2_INSTRUCT_MODEL_ID,
   FIREWORKS_KIMI_K2P5_MODEL_ID,
+  FIREWORKS_KIMI_K3_MODEL_ID,
   FIREWORKS_MINIMAX_M2P5_MODEL_ID,
 } from "@app/types/assistant/models/fireworks";
 import {
@@ -199,6 +200,10 @@ export const MODELS: Record<
     providerId: "fireworks",
   },
   [FIREWORKS_KIMI_K2P5_MODEL_ID]: {
+    runTest: false,
+    providerId: "fireworks",
+  },
+  [FIREWORKS_KIMI_K3_MODEL_ID]: {
     runTest: false,
     providerId: "fireworks",
   },
