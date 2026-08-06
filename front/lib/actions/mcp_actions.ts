@@ -86,6 +86,8 @@ import {
   DEFAULT_MCP_TOOL_RETRY_POLICY,
   getRetryPolicyFromToolConfiguration,
 } from "@app/lib/api/mcp";
+import type { TrivialTrojanDetectionResult } from "@app/lib/api/mcp/trivial_trojan_check";
+import { detectTrivialTrojan } from "@app/lib/api/mcp/trivial_trojan_check";
 import { invalidateOAuthConnectionAccessTokenCache } from "@app/lib/api/oauth_access_token";
 import type { Authenticator } from "@app/lib/auth";
 import { MCPServerConnectionResource } from "@app/lib/resources/mcp_server_connection_resource";
@@ -1285,6 +1287,44 @@ export async function listToolsForServerSideMCPServer(
   );
 }
 
+// Relative strictness of MCP tool stake levels, "high" being the most cautious
+// (requires explicit user approval before the tool can run).
+const STAKE_LEVEL_RANK: Record<MCPToolStakeLevelType, number> = {
+  high: 3,
+  medium: 2,
+  low: 1,
+  never_ask: 0,
+};
+
+/**
+ * Applies a trivial-trojan detection result (see
+ * `@app/lib/api/mcp/trivial_trojan_check`) to a server-side tool list: any tool
+ * that participates in a sensitive-reader + network-exfiltrator pair is
+ * elevated to at least "high" stake, so it requires user approval before it can
+ * run. Only ever raises the stake, never lowers it. Returns a new array; the
+ * input is not mutated.
+ *
+ * Paper: "Trivial Trojans" (arXiv:2507.19880).
+ */
+export function elevateStakesForTrivialTrojan(
+  tools: ServerSideMCPToolTypeWithStakeAndRetryPolicy[],
+  detection: TrivialTrojanDetectionResult
+): ServerSideMCPToolTypeWithStakeAndRetryPolicy[] {
+  if (!detection.detected) {
+    return tools;
+  }
+  const flagged = new Set<string>([
+    ...detection.readerToolNames,
+    ...detection.exfiltratorToolNames,
+  ]);
+  return tools.map((tool) =>
+    flagged.has(tool.name) &&
+    STAKE_LEVEL_RANK[tool.stakeLevel] < STAKE_LEVEL_RANK.high
+      ? { ...tool, stakeLevel: "high" }
+      : tool
+  );
+}
+
 export async function buildToolConfigurationsFromRawTools(
   auth: Authenticator,
   mcpServerId: string,
@@ -1345,9 +1385,21 @@ export async function buildToolConfigurationsFromRawTools(
       };
     });
 
+  // Trivial-trojan heuristic (arXiv:2507.19880): for third-party remote MCP
+  // servers (no internal server name), elevate the stake of any tool that
+  // participates in a sensitive-reader + network-exfiltrator pair so it
+  // requires user approval. Internal servers are code-reviewed and trusted, so
+  // they are intentionally left untouched.
+  const toolsWithTrojanStakes = internalServerName
+    ? toolsWithStakesRetryPoliciesAndTimeout
+    : elevateStakesForTrivialTrojan(
+        toolsWithStakesRetryPoliciesAndTimeout,
+        detectTrivialTrojan(allToolsRaw)
+      );
+
   const serverSideToolConfigs = makeServerSideMCPToolConfigurations(
     config,
-    toolsWithStakesRetryPoliciesAndTimeout,
+    toolsWithTrojanStakes,
     toolsArgumentsRequiringApproval
   );
   return new Ok(serverSideToolConfigs);
