@@ -56,6 +56,18 @@ observed_landing_zones:
     branch: kimi-k3-open-frontier-intelligence-v2
     timestamp: '2026-08-06T21:48:35Z'
   last_observed: '2026-08-06T21:48:35Z'
+- path: front/temporal/agent_loop/lib/
+  shape_tags:
+  - unclassified
+  confirmed_by:
+  - arxiv: 2608.02464v1
+    mode: Mode 2 (adapted port)
+    call_site_specifics: agentLoopWorkflow in front/temporal/agent_loop/workflows.ts
+      (the Temporal workflow started via client.workflow.start(agentLoopWorkflow,
+      ...) in front/temporal/agent_loop/client.ts). BehavioralFailureM
+    branch: real-time-detection-and-repair-of-llm-agent-failures
+    timestamp: '2026-08-07T16:22:28Z'
+  last_observed: '2026-08-07T16:22:28Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -66,4 +78,4 @@ rejected_shapes:
   - arxiv: 2407.03618v1
     timestamp: '2026-07-24T10:27:15Z'
 coordination_signals: []
-last_updated: '2026-08-06T21:48:35Z'
+last_updated: '2026-08-07T16:22:28Z'
