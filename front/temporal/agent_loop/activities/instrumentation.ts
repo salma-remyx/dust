@@ -2,6 +2,7 @@ import { getStatsDClient } from "@app/lib/utils/statsd";
 
 // StatsD metric names.
 export const METRICS = {
+  BEHAVIORAL_FAILURE_DETECTED: "agent_loop.behavioral_failure_detected",
   LOOP_COMPLETIONS: "agent_loop.completions",
   LOOP_DURATION: "agent_loop.duration_ms",
   LOOP_STARTS: "agent_loop.starts",

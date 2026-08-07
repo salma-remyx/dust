@@ -36,6 +36,11 @@ import { Context } from "@temporalio/activity";
 export type RunModelAndCreateActionsResult = {
   actionBlobs: ActionBlob[];
   runId: string | null;
+  // Stable signature of the tool calls the model made this step, consumed by the
+  // agent-loop workflow's behavioral-failure monitor. Absent when the model did
+  // not run this step (e.g. resuming existing actions) — the workflow treats
+  // absence as "no calls this step".
+  toolCallSignature?: string;
 };
 
 const AGENT_LOOP_COST_CAP_ERROR_CODE = "agent_loop_cost_cap_exceeded";
@@ -304,6 +309,7 @@ async function _runModelAndCreateActionsActivity({
   return {
     runId,
     actionBlobs: createResult.actionBlobs,
+    toolCallSignature: createResult.toolCallSignature,
   };
 }
 

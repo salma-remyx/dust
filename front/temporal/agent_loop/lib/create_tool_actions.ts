@@ -40,9 +40,59 @@ export interface ActionBlob {
   retryPolicy: MCPToolRetryPolicyType;
 }
 
+/**
+ * One tool call the model made this step, reduced to the fields that identify it
+ * for behavioral-failure detection: the tool name and the parsed arguments.
+ */
+export interface StepToolCall {
+  name: string;
+  args: unknown;
+}
+
 type CreateToolActionsResult = {
   actionBlobs: ActionBlob[];
+  // Stable signature of the tool calls made this step (see
+  // `buildStepToolCallSignature`). Consumed by the agent-loop workflow's
+  // behavioral-failure monitor; empty when no tool calls were made.
+  toolCallSignature: string;
 };
+
+/**
+ * Deterministically serialize a value so that two semantically-equal arguments
+ * produce the same string regardless of object key order. The model can emit the
+ * same arguments in a different key order across steps; collapsing that keeps
+ * loop detection from missing a real repeat.
+ */
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (isJsonObject(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`)
+      .join(",")}}`;
+  }
+  // Primitives (and null) serialize directly.
+  return JSON.stringify(value);
+}
+
+/**
+ * Build an order-independent signature for a step's tool calls. Two steps whose
+ * agents called the same tools with the same arguments — in any order — produce
+ * the same signature, which is what the behavioral-failure monitor compares to
+ * detect a tool-call loop. An empty input yields an empty signature (no calls).
+ */
+export function buildStepToolCallSignature(calls: StepToolCall[]): string {
+  return calls
+    .map((c) => `${c.name}:${stableStringify(c.args)}`)
+    .sort()
+    .join("|");
+}
 
 export async function createToolActionsActivity(
   auth: Authenticator,
@@ -65,6 +115,7 @@ export async function createToolActionsActivity(
   const { agentConfiguration, agentMessage, conversation } = runAgentData;
 
   const actionBlobs: ActionBlob[] = [];
+  const toolCalls: StepToolCall[] = [];
   const approvalEvents: Omit<
     MCPApproveExecutionEvent,
     "isLastBlockingEventForStep"
@@ -87,12 +138,13 @@ export async function createToolActionsActivity(
       runIds,
     });
 
-    if (result) {
+    if (result.actionBlob) {
       actionBlobs.push(result.actionBlob);
-      if (result.approvalEventData) {
-        approvalEvents.push(result.approvalEventData);
-      }
     }
+    if (result.approvalEventData) {
+      approvalEvents.push(result.approvalEventData);
+    }
+    toolCalls.push(result.toolCall);
   }
 
   // Publish all approval events with the isLastBlockingEventForStep flag
@@ -112,6 +164,7 @@ export async function createToolActionsActivity(
 
   return {
     actionBlobs,
+    toolCallSignature: buildStepToolCallSignature(toolCalls),
   };
 }
 
@@ -137,12 +190,16 @@ async function createActionForTool(
     runIds: string[];
   }
 ): Promise<{
-  actionBlob: ActionBlob;
+  actionBlob?: ActionBlob;
   approvalEventData?: Omit<
     MCPApproveExecutionEvent,
     "isLastBlockingEventForStep"
   >;
-} | void> {
+  // The tool call this step (name + parsed args), contributed to the step's
+  // behavioral-failure signature even when input validation rejected it — a
+  // model stuck re-sending invalid arguments is itself a loop.
+  toolCall: StepToolCall;
+}> {
   // First, get the step content and parse inputs - we need this for medium stake checks
   const stepContent = await AgentStepContentResource.fetchByModelIdWithAuth(
     auth,
@@ -184,7 +241,7 @@ async function createActionForTool(
       },
       "Tool input validation failed"
     );
-    return updateResourceAndPublishEvent(auth, {
+    await updateResourceAndPublishEvent(auth, {
       event: {
         type: "tool_error",
         created: Date.now(),
@@ -204,6 +261,10 @@ async function createActionForTool(
       conversation,
       step,
     });
+
+    return {
+      toolCall: { name: actionConfiguration.name, args: rawInputs },
+    };
   }
 
   // Compute augmented inputs with preconfigured data sources, etc.
@@ -282,6 +343,7 @@ async function createActionForTool(
       needsApproval: status === "blocked_validation_required",
       retryPolicy: getRetryPolicyFromToolConfiguration(actionConfiguration),
     },
+    toolCall: { name: actionConfiguration.name, args: rawInputs },
     approvalEventData:
       status === "blocked_validation_required"
         ? {

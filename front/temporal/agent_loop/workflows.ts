@@ -16,6 +16,7 @@ import {
   RUN_MODEL_MAX_RETRIES,
   TOOL_ACTIVITY_HEARTBEAT_TIMEOUT_MS,
 } from "@app/temporal/agent_loop/config";
+import { BehavioralFailureMonitor } from "@app/temporal/agent_loop/lib/behavioral_failures";
 import {
   isRunModelLLMUnresponsiveError,
   isTerminalRunModelTimeout,
@@ -245,6 +246,11 @@ export async function agentLoopWorkflow({
         typeof agentLoopConversationTitleWorkflow
       > | null = null;
 
+      // Detects behavioral failures (e.g. tool-call loops) from per-step
+      // telemetry, without an LLM judge. Lives for the whole phase so it can
+      // compare consecutive steps; an empty signature resets the streak.
+      const behavioralFailureMonitor = new BehavioralFailureMonitor();
+
       metrics.logPhaseStart(
         authType.workspaceId,
         agentMessageId,
@@ -257,20 +263,38 @@ export async function agentLoopWorkflow({
 
         const stepStartTime = Date.now();
 
-        const { runId, shouldContinue } = await executeStepIteration({
-          authType,
-          agentLoopArgs: {
-            ...agentLoopArgs,
-            initialStartTime,
-          },
-          currentStep,
-          runIds,
-          startStep,
-        });
+        const { runId, shouldContinue, toolCallSignature } =
+          await executeStepIteration({
+            authType,
+            agentLoopArgs: {
+              ...agentLoopArgs,
+              initialStartTime,
+            },
+            currentStep,
+            runIds,
+            startStep,
+          });
 
         // Update state with results.
         if (runId) {
           runIds.push(runId);
+        }
+
+        // Flag behavioral failures (currently: the agent repeating identical
+        // tool calls across steps). Observation only — it does not change the
+        // loop's control flow; the metric lets us see how often agents get
+        // stuck and correlate it with model / configuration.
+        for (const detection of behavioralFailureMonitor.observeStep(
+          currentStep,
+          toolCallSignature
+        )) {
+          metrics.logBehavioralFailureDetected(
+            agentMessageId,
+            conversationId,
+            currentStep,
+            detection.type,
+            detection.repeatCount
+          );
         }
 
         metrics.logStepCompletion(
@@ -424,6 +448,7 @@ async function executeStepIteration({
 }): Promise<{
   runId: string | null;
   shouldContinue: boolean;
+  toolCallSignature: string;
 }> {
   const result = await runModelAndCreateActionsActivity({
     authType,
@@ -438,10 +463,12 @@ async function executeStepIteration({
     return {
       runId: null,
       shouldContinue: false,
+      toolCallSignature: "",
     };
   }
 
-  const { runId, actionBlobs } = result;
+  const { runId, actionBlobs, toolCallSignature } = result;
+  const signature = toolCallSignature ?? "";
 
   // Generation completed or the loop unpaused and no new tools were generated.
   if (actionBlobs.length === 0) {
@@ -450,6 +477,7 @@ async function executeStepIteration({
       // If runId is null that means we unpaused the loop with no new tools (eg: they were all
       // denied) and no LLM call, so we need to continue as the agent loop is not finished.
       shouldContinue: runId === null,
+      toolCallSignature: signature,
     };
   }
 
@@ -460,6 +488,7 @@ async function executeStepIteration({
     return {
       runId,
       shouldContinue: false,
+      toolCallSignature: signature,
     };
   }
 
@@ -497,6 +526,7 @@ async function executeStepIteration({
       return {
         runId,
         shouldContinue: false,
+        toolCallSignature: signature,
       };
     }
   }
@@ -504,6 +534,7 @@ async function executeStepIteration({
   return {
     runId,
     shouldContinue: !toolResults.some((result) => result.shouldPauseAgentLoop),
+    toolCallSignature: signature,
   };
 }
 

@@ -37,6 +37,14 @@ export interface AgentLoopInstrumentationSinks extends Sinks {
       stepsCompleted: number,
       syncStartTime: number
     ): void;
+
+    logBehavioralFailureDetected(
+      agentMessageId: string,
+      conversationId: string,
+      step: number,
+      failureType: string,
+      repeatCount: number
+    ): void;
   };
 }
 
@@ -124,6 +132,31 @@ export const instrumentationSinks: InjectedSinks<AgentLoopInstrumentationSinks> 
             METRICS.LOOP_DURATION,
             totalDurationMs
           );
+        },
+      },
+      logBehavioralFailureDetected: {
+        fn(
+          _info,
+          agentMessageId: string,
+          conversationId: string,
+          step: number,
+          failureType: string,
+          repeatCount: number
+        ) {
+          logger.warn(
+            {
+              agentMessageId,
+              conversationId,
+              step,
+              failureType,
+              repeatCount,
+            },
+            "Agent loop behavioral failure detected from step telemetry"
+          );
+
+          getStatsDClient().increment(METRICS.BEHAVIORAL_FAILURE_DETECTED, 1, [
+            `failure_type:${failureType}`,
+          ]);
         },
       },
     },
