@@ -68,6 +68,16 @@ observed_landing_zones:
     branch: real-time-detection-and-repair-of-llm-agent-failures
     timestamp: '2026-08-07T16:22:28Z'
   last_observed: '2026-08-07T16:22:28Z'
+- path: front/scripts/mcp_bm25/
+  shape_tags:
+  - unclassified
+  confirmed_by:
+  - arxiv: 2608.04719v1
+    mode: ''
+    call_site_specifics: ''
+    branch: diagnosing-tool-selection-reasoning-in-llm-agents-with-canar
+    timestamp: '2026-08-08T08:51:06Z'
+  last_observed: '2026-08-08T08:51:06Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -78,4 +88,4 @@ rejected_shapes:
   - arxiv: 2407.03618v1
     timestamp: '2026-07-24T10:27:15Z'
 coordination_signals: []
-last_updated: '2026-08-07T16:22:28Z'
+last_updated: '2026-08-08T08:51:06Z'
