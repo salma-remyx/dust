@@ -78,6 +78,18 @@ observed_landing_zones:
     branch: diagnosing-tool-selection-reasoning-in-llm-agents-with-canar
     timestamp: '2026-08-08T08:51:06Z'
   last_observed: '2026-08-08T08:51:06Z'
+- path: front/tests/sidekick-evals/lib/
+  shape_tags:
+  - unclassified
+  confirmed_by:
+  - arxiv: 2608.07346v1
+    mode: Mode 2 (adapted port)
+    call_site_specifics: evaluateWithJudge in front/tests/sidekick-evals/lib/judge.ts
+      (the judge forward path, invoked from the eval pipeline at sidekick-eval.test.ts:97);
+      a second call site is generateSidekickImprovementSugg
+    branch: an-end-to-end-agent-auditing-engine
+    timestamp: '2026-08-12T21:55:30Z'
+  last_observed: '2026-08-12T21:55:30Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -88,4 +100,4 @@ rejected_shapes:
   - arxiv: 2407.03618v1
     timestamp: '2026-07-24T10:27:15Z'
 coordination_signals: []
-last_updated: '2026-08-08T08:51:06Z'
+last_updated: '2026-08-12T21:55:30Z'
