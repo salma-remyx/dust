@@ -1,5 +1,6 @@
 import type { Authenticator } from "@app/lib/auth";
 import logger from "@app/logger/logger";
+import { summarizeAgentAuditMetrics } from "@app/tests/sidekick-evals/lib/agent_audit_metrics";
 import { executeSidekick } from "@app/tests/sidekick-evals/lib/sidekick-executor";
 import {
   type EvalResult,
@@ -28,6 +29,7 @@ Based on the failure patterns above, please analyze the issues and suggest speci
 2. **Missing guidance** - What instructions are missing that would have helped?
 3. **Unclear directives** - What existing instructions might be ambiguous or misleading?
 4. **Specific additions** - Provide concrete instruction text to add or modify.
+5. **Dimensional breakdown** - Each scenario lists audit dimensions (tool use, efficiency, planning, recovery). Identify which capability the failures cluster in and prioritize instruction fixes for that capability.
 
 Be specific and actionable. Provide exact text that could be added to the instructions.`;
 
@@ -37,6 +39,8 @@ interface FailedScenario {
   sidekickResponse: string;
   judgeReasoning: string;
   score: number;
+  /** A^2E-style per-dimension audit summary for this scenario. */
+  auditSummary: string;
 }
 
 export interface SidekickOnSidekickReport {
@@ -50,7 +54,8 @@ function formatScenario(scenario: FailedScenario, index: number): string {
 **User message:** ${scenario.userMessage}
 **Sidekick response:** ${scenario.sidekickResponse}
 **Judge reasoning:** ${scenario.judgeReasoning}
-**Score:** ${scenario.score}/3`;
+**Score:** ${scenario.score}/3
+**Audit dimensions:** ${scenario.auditSummary}`;
 }
 
 function createSidekickSelfState(config: SidekickConfig): MockAgentState {
@@ -94,6 +99,9 @@ export async function generateSidekickImprovementSuggestions(
     sidekickResponse: r.responseText,
     judgeReasoning: r.judgeResult.reasoning,
     score: r.judgeResult.finalScore,
+    auditSummary: r.judgeResult.auditMetrics
+      ? summarizeAgentAuditMetrics(r.judgeResult.auditMetrics)
+      : "(audit metrics unavailable)",
   }));
 
   const scenariosToAnalyze = failedScenarios.slice(0, MAX_SCENARIOS);

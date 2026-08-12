@@ -93,6 +93,8 @@ export interface JudgeResult {
   finalScore: number;
   scores: number[];
   reasoning: string;
+  /** Multidimensional audit metrics; populated by evaluateWithJudge. */
+  auditMetrics?: AgentAuditMetrics;
 }
 
 export interface SidekickExecutionResult {
@@ -108,4 +110,47 @@ export interface EvalResult {
   judgeResult: JudgeResult;
   passed: boolean;
   sidekickModelTimeMs: number;
+}
+
+/**
+ * Multidimensional agent-audit metrics extending JudgeResult's holistic score.
+ * Adapted from A^2E (Agent Auditing Engine, arxiv:2608.07346): four
+ * trace-derived dimensions, each scored [0, 1], plus an aggregate on the
+ * judge's 0-3 scale. Parameter-free proxies live in agent_audit_metrics.ts.
+ */
+export interface AgentAuditMetrics {
+  toolUse: {
+    /** Fraction of expected tools called (1.0 when none expected). */
+    recall: number;
+    /** unique signatures / total; penalizes repeated identical calls. */
+    precision: number;
+    score: number;
+    totalCalls: number;
+    redundantCalls: number;
+    missingExpectedCount: number;
+  };
+  executionEfficiency: {
+    responseVerbosity: number;
+    toolEconomy: number;
+    score: number;
+    responseWordCount: number;
+  };
+  taskPlanning: {
+    structureScore: number;
+    /** Vocab-overlap of judge-criteria intent keywords in the response. */
+    criteriaCoverage: number;
+    score: number;
+    structuredStepCount: number;
+  };
+  // "Error recovery" is proxied by graceful edge-case handling (see module).
+  errorRecovery: {
+    score: number;
+    recoveryNeedDetected: boolean;
+    asksClarifyingQuestion: boolean;
+    unavailableToolAcknowledged: boolean | null;
+  };
+  /** Weighted aggregate across the four dimensions in [0, 1]. */
+  overall: number;
+  /** overall mapped to the judge's 0-3 scale for side-by-side comparison. */
+  grade: number;
 }

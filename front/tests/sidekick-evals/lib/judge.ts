@@ -1,6 +1,7 @@
 import { getStreamLLM } from "@app/lib/api/llm";
 import { getLlmCredentials } from "@app/lib/api/provider_credentials";
 import type { Authenticator } from "@app/lib/auth";
+import { computeAgentAuditMetrics } from "@app/tests/sidekick-evals/lib/agent_audit_metrics";
 import {
   getTestCaseUserMessageForDisplay,
   type JudgeResult,
@@ -164,5 +165,14 @@ export async function evaluateWithJudge(
       ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
       : 0;
 
-  return { finalScore, scores, reasoning: lastReasoning };
+  // Extend the holistic score with A^2E-style multidimensional audit metrics
+  // computed from the same trajectory (tool calls, response, expected tools).
+  const auditMetrics = computeAgentAuditMetrics({
+    toolCalls,
+    responseText: sidekickResponse,
+    expectedToolCalls: testCase.expectedToolCalls,
+    judgeCriteria: testCase.judgeCriteria,
+  });
+
+  return { finalScore, scores, reasoning: lastReasoning, auditMetrics };
 }
