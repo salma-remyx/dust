@@ -100,7 +100,11 @@ describe.skipIf(!RUN_SIDEKICK_EVAL)("Sidekick Evaluation Tests", () => {
               testCase.mockState,
               toolCalls,
               responseText,
-              JUDGE_RUNS
+              JUDGE_RUNS,
+              {
+                modelTimeMs,
+                availableToolNames: sidekickConfig.tools.map((t) => t.name),
+              }
             );
 
             const actualToolNames = toolCalls.map((t) => t.name);

@@ -78,13 +78,20 @@ At this point, you judging the quality of the sidekick response AND the quality 
 
 Provide your evaluation using the REASONING: and SCORE: format described above.`;
 
+/** Optional trace context enabling the A^2E efficiency/tool-group metrics. */
+export interface JudgeEvalOptions {
+  modelTimeMs?: number;
+  availableToolNames?: string[];
+}
+
 export async function evaluateWithJudge(
   auth: Authenticator,
   testCase: TestCase,
   agentState: MockAgentState,
   toolCalls: ToolCall[],
   sidekickResponse: string,
-  numRuns: number = 1
+  numRuns: number = 1,
+  options: JudgeEvalOptions = {}
 ): Promise<JudgeResult> {
   const prompt = JUDGE_PROMPT.replace(
     "{{USER_MESSAGE}}",
@@ -172,6 +179,9 @@ export async function evaluateWithJudge(
     responseText: sidekickResponse,
     expectedToolCalls: testCase.expectedToolCalls,
     judgeCriteria: testCase.judgeCriteria,
+    modelTimeMs: options.modelTimeMs,
+    availableToolNames: options.availableToolNames,
+    effectivenessScore: finalScore,
   });
 
   return { finalScore, scores, reasoning: lastReasoning, auditMetrics };

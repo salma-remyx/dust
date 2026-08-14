@@ -9,6 +9,12 @@ export interface AuditMetricsInput {
   responseText: string;
   expectedToolCalls?: string[];
   judgeCriteria: string;
+  /** Sidekick tool-call latency; feeds the elapsed_time bands and Q_h. */
+  modelTimeMs?: number;
+  /** Tool names in the sidekick's spec; enables tool_hallucination. */
+  availableToolNames?: string[];
+  /** Judge score on the 0-3 scale; feeds the Q_h trade-off. */
+  effectivenessScore?: number;
 }
 
 /**
@@ -32,10 +38,47 @@ const WEIGHT_RECOVERY = 0.2;
 const WEIGHT_EFFICIENCY = 0.15;
 
 const STOPWORDS = new Set([
-  "the", "a", "an", "and", "or", "but", "if", "then", "else", "when", "to",
-  "of", "in", "on", "for", "with", "is", "are", "be", "should", "must", "not",
-  "no", "score", "tool", "call", "agent", "sidekick", "user", "this", "that",
-  "it", "as", "at", "by", "from", "into", "they", "their", "you", "your",
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "but",
+  "if",
+  "then",
+  "else",
+  "when",
+  "to",
+  "of",
+  "in",
+  "on",
+  "for",
+  "with",
+  "is",
+  "are",
+  "be",
+  "should",
+  "must",
+  "not",
+  "no",
+  "score",
+  "tool",
+  "call",
+  "agent",
+  "sidekick",
+  "user",
+  "this",
+  "that",
+  "it",
+  "as",
+  "at",
+  "by",
+  "from",
+  "into",
+  "they",
+  "their",
+  "you",
+  "your",
 ]);
 
 // toolEconomy indexed by tool-call count: [0]=no calls, [1]=one call, ...
@@ -56,10 +99,7 @@ function round(value: number): number {
 }
 
 /** Stable signature so repeated calls with the same args count as redundant. */
-function signatureOf(toolCall: {
-  name: string;
-  arguments: unknown;
-}): string {
+function signatureOf(toolCall: { name: string; arguments: unknown }): string {
   return `${toolCall.name}::${JSON.stringify(toolCall.arguments)}`;
 }
 
@@ -70,6 +110,11 @@ function extractKeywords(text: string): string[] {
     .filter((token) => token.length > 3 && !STOPWORDS.has(token));
   return Array.from(new Set(tokens));
 }
+
+// Elapsed-time bands from the A^2E metrics catalog: fast < 5s, medium
+// 5-30s, slow >= 30s. The slow-band boundary also normalizes time for Q_h.
+const ELAPSED_FAST_MAX_MS = 5_000;
+const ELAPSED_SLOW_MIN_MS = 30_000;
 
 function computeToolUse(
   input: AuditMetricsInput
@@ -139,9 +184,7 @@ function computeTaskPlanning(
   input: AuditMetricsInput
 ): AgentAuditMetrics["taskPlanning"] {
   // Structured step indicators: numbered lists ("1." / "2)") or bullet items.
-  const matches = input.responseText.match(
-    /(?:^|\n)\s*(?:\d+[.)]|[-*])\s+\S/g
-  );
+  const matches = input.responseText.match(/(?:^|\n)\s*(?:\d+[.)]|[-*])\s+\S/g);
   const structuredStepCount = matches ? matches.length : 0;
   let structureScore: number;
   if (structuredStepCount === 0) {
@@ -154,9 +197,7 @@ function computeTaskPlanning(
 
   const keywords = extractKeywords(input.judgeCriteria);
   const lowerResponse = input.responseText.toLowerCase();
-  const matched = keywords.filter((keyword) =>
-    lowerResponse.includes(keyword)
-  );
+  const matched = keywords.filter((keyword) => lowerResponse.includes(keyword));
   // Neutral when there are no criteria keywords to match against.
   const criteriaCoverage =
     keywords.length === 0 ? 0.5 : matched.length / keywords.length;
@@ -216,6 +257,85 @@ function computeErrorRecovery(
 }
 
 /**
+ * A^2E tool_hallucination: tool calls whose names are not in the spec the
+ * sidekick was given. Null when the spec is unknown to the caller.
+ */
+function computeToolHallucination(
+  input: AuditMetricsInput
+): AgentAuditMetrics["toolHallucination"] {
+  if (!input.availableToolNames) {
+    return null;
+  }
+  const available = new Set(input.availableToolNames);
+  const unknownToolNames = Array.from(
+    new Set(
+      input.toolCalls
+        .map((toolCall) => toolCall.name)
+        .filter((name) => !available.has(name))
+    )
+  );
+  const totalCalls = input.toolCalls.length;
+  const score =
+    totalCalls === 0 ? 1 : clamp01(1 - unknownToolNames.length / totalCalls);
+  return {
+    hallucinatedCalls: unknownToolNames.length,
+    unknownToolNames,
+    score: round(score),
+  };
+}
+
+/** A^2E elapsed_time bands over the sidekick's model latency. */
+function computeElapsedTime(
+  input: AuditMetricsInput
+): AgentAuditMetrics["elapsedTime"] {
+  if (input.modelTimeMs === undefined) {
+    return null;
+  }
+  const modelTimeMs = input.modelTimeMs;
+  let band: "fast" | "medium" | "slow";
+  let score: number;
+  if (modelTimeMs < ELAPSED_FAST_MAX_MS) {
+    band = "fast";
+    score = 1;
+  } else if (modelTimeMs < ELAPSED_SLOW_MIN_MS) {
+    band = "medium";
+    score = 0.7;
+  } else {
+    band = "slow";
+    score = 0.4;
+  }
+  return { band, score, modelTimeMs };
+}
+
+/**
+ * A^2E effectiveness-efficiency trade-off:
+ * Q_h = 1 - sqrt(T_hat^2 + (1 - S_hat)^2) / sqrt(2), in [0, 1]; 1 means full
+ * effectiveness at zero time cost.
+ */
+function computeEffectivenessEfficiencyTradeOff(
+  input: AuditMetricsInput
+): AgentAuditMetrics["effectivenessEfficiencyTradeOff"] {
+  if (
+    input.effectivenessScore === undefined ||
+    input.modelTimeMs === undefined
+  ) {
+    return null;
+  }
+  const normalizedEffectiveness = clamp01(input.effectivenessScore / 3);
+  const normalizedTimeMs = clamp01(input.modelTimeMs / ELAPSED_SLOW_MIN_MS);
+  const score = clamp01(
+    1 -
+      Math.sqrt(normalizedTimeMs ** 2 + (1 - normalizedEffectiveness) ** 2) /
+        Math.sqrt(2)
+  );
+  return {
+    score: round(score),
+    normalizedEffectiveness: round(normalizedEffectiveness),
+    normalizedTimeMs: round(normalizedTimeMs),
+  };
+}
+
+/**
  * Compute A^2E-style audit metrics from a sidekick execution trace. Scores are
  * parameter-free proxies in [0, 1]; `grade` maps the aggregate to 0-3.
  */
@@ -226,6 +346,10 @@ export function computeAgentAuditMetrics(
   const executionEfficiency = computeExecutionEfficiency(input);
   const taskPlanning = computeTaskPlanning(input);
   const errorRecovery = computeErrorRecovery(input);
+  const toolHallucination = computeToolHallucination(input);
+  const elapsedTime = computeElapsedTime(input);
+  const effectivenessEfficiencyTradeOff =
+    computeEffectivenessEfficiencyTradeOff(input);
 
   const overall = clamp01(
     WEIGHT_TOOL_USE * toolUse.score +
@@ -239,21 +363,31 @@ export function computeAgentAuditMetrics(
     executionEfficiency,
     taskPlanning,
     errorRecovery,
+    toolHallucination,
+    elapsedTime,
+    effectivenessEfficiencyTradeOff,
     overall: round(overall),
     grade: Math.round(overall * 3),
   };
 }
 
 /** Compact one-line summary for logging and sidekick-on-sidekick analysis. */
-export function summarizeAgentAuditMetrics(
-  metrics: AgentAuditMetrics
-): string {
-  return [
+export function summarizeAgentAuditMetrics(metrics: AgentAuditMetrics): string {
+  const parts = [
     `toolUse=${metrics.toolUse.score}`,
     `efficiency=${metrics.executionEfficiency.score}`,
     `planning=${metrics.taskPlanning.score}`,
     `recovery=${metrics.errorRecovery.score}`,
-    `overall=${metrics.overall}`,
-    `grade=${metrics.grade}/3`,
-  ].join(", ");
+  ];
+  if (metrics.toolHallucination) {
+    parts.push(`hallucination=${metrics.toolHallucination.score}`);
+  }
+  if (metrics.elapsedTime) {
+    parts.push(`elapsed=${metrics.elapsedTime.band}`);
+  }
+  if (metrics.effectivenessEfficiencyTradeOff) {
+    parts.push(`tradeOff=${metrics.effectivenessEfficiencyTradeOff.score}`);
+  }
+  parts.push(`overall=${metrics.overall}`, `grade=${metrics.grade}/3`);
+  return parts.join(", ");
 }

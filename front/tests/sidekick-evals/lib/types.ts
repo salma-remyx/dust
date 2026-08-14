@@ -149,6 +149,35 @@ export interface AgentAuditMetrics {
     asksClarifyingQuestion: boolean;
     unavailableToolAcknowledged: boolean | null;
   };
+  /**
+   * A^2E tool-group metric: calls to tools outside the sidekick's spec.
+   * Null when the available tool names were not provided.
+   */
+  toolHallucination: {
+    hallucinatedCalls: number;
+    unknownToolNames: string[];
+    score: number;
+  } | null;
+  /**
+   * A^2E efficiency-group elapsed_time bands (fast < 5s, medium 5-30s,
+   * slow >= 30s). Null when modelTimeMs was not provided.
+   */
+  elapsedTime: {
+    band: "fast" | "medium" | "slow";
+    score: number;
+    modelTimeMs: number;
+  } | null;
+  /**
+   * A^2E effectiveness-efficiency trade-off:
+   * Q_h = 1 - sqrt(T_hat^2 + (1 - S_hat)^2) / sqrt(2), with S_hat the judge
+   * score normalized to [0, 1] and T_hat modelTimeMs normalized against the
+   * slow band. Null when either input is missing.
+   */
+  effectivenessEfficiencyTradeOff: {
+    score: number;
+    normalizedEffectiveness: number;
+    normalizedTimeMs: number;
+  } | null;
   /** Weighted aggregate across the four dimensions in [0, 1]. */
   overall: number;
   /** overall mapped to the judge's 0-3 scale for side-by-side comparison. */

@@ -137,6 +137,104 @@ describe("computeAgentAuditMetrics", () => {
       /toolUse=.*grade=\d\/3/
     );
   });
+
+  it("flags tool calls outside the sidekick's spec as hallucinated", () => {
+    const metrics = computeAgentAuditMetrics({
+      toolCalls: [
+        { name: "get_agent_config", arguments: {} },
+        { name: "delete_workspace", arguments: {} },
+      ],
+      responseText: "1. a\n2. b",
+      expectedToolCalls: ["get_agent_config"],
+      judgeCriteria: "Assess the agent and suggest improvements.",
+      availableToolNames: ["get_agent_config", "suggest_prompt_edits"],
+    });
+    expect(metrics.toolHallucination).not.toBeNull();
+    expect(metrics.toolHallucination?.hallucinatedCalls).toBe(1);
+    expect(metrics.toolHallucination?.unknownToolNames).toEqual([
+      "delete_workspace",
+    ]);
+    expect(metrics.toolHallucination?.score).toBe(0.5);
+  });
+
+  it("omits tool hallucination when the spec is not provided", () => {
+    const metrics = computeAgentAuditMetrics({
+      toolCalls: [{ name: "get_agent_config", arguments: {} }],
+      responseText: "ok",
+      expectedToolCalls: ["get_agent_config"],
+      judgeCriteria: "Assess the agent.",
+    });
+    expect(metrics.toolHallucination).toBeNull();
+  });
+
+  it("bands elapsed time per the A^2E catalog thresholds", () => {
+    const base = {
+      toolCalls: [],
+      responseText: "ok",
+      judgeCriteria: "Assess the agent.",
+    };
+    expect(
+      computeAgentAuditMetrics({ ...base, modelTimeMs: 2_000 }).elapsedTime
+        ?.band
+    ).toBe("fast");
+    expect(
+      computeAgentAuditMetrics({ ...base, modelTimeMs: 12_000 }).elapsedTime
+        ?.band
+    ).toBe("medium");
+    expect(
+      computeAgentAuditMetrics({ ...base, modelTimeMs: 45_000 }).elapsedTime
+        ?.band
+    ).toBe("slow");
+    expect(computeAgentAuditMetrics(base).elapsedTime).toBeNull();
+  });
+
+  it("scores the Q_h effectiveness-efficiency trade-off", () => {
+    const base = {
+      toolCalls: [],
+      responseText: "ok",
+      judgeCriteria: "Assess the agent.",
+    };
+    const fastAndEffective = computeAgentAuditMetrics({
+      ...base,
+      modelTimeMs: 0,
+      effectivenessScore: 3,
+    }).effectivenessEfficiencyTradeOff;
+    expect(fastAndEffective?.score).toBe(1);
+
+    const slowAndWeak = computeAgentAuditMetrics({
+      ...base,
+      modelTimeMs: 60_000,
+      effectivenessScore: 0,
+    }).effectivenessEfficiencyTradeOff;
+    expect(slowAndWeak?.score).toBe(0);
+
+    // Mid-range: full effectiveness at the slow-band boundary.
+    const mid = computeAgentAuditMetrics({
+      ...base,
+      modelTimeMs: 30_000,
+      effectivenessScore: 3,
+    }).effectivenessEfficiencyTradeOff;
+    expect(mid?.score).toBeCloseTo(0.29, 2);
+
+    expect(
+      computeAgentAuditMetrics(base).effectivenessEfficiencyTradeOff
+    ).toBeNull();
+  });
+
+  it("includes the optional metrics in the one-line summary", () => {
+    const metrics = computeAgentAuditMetrics({
+      toolCalls: [{ name: "get_agent_config", arguments: {} }],
+      responseText: "1. a\n2. b",
+      expectedToolCalls: ["get_agent_config"],
+      judgeCriteria: "Assess the agent and suggest improvements.",
+      modelTimeMs: 8_000,
+      availableToolNames: ["get_agent_config"],
+      effectivenessScore: 2,
+    });
+    expect(summarizeAgentAuditMetrics(metrics)).toMatch(
+      /hallucination=1.*elapsed=medium.*tradeOff=.*grade=\d\/3/
+    );
+  });
 });
 
 describe("evaluateWithJudge audit-metrics wiring", () => {
@@ -156,7 +254,11 @@ describe("evaluateWithJudge audit-metrics wiring", () => {
       mockState,
       toolCalls,
       "Here is a plan:\n1. Assess current instructions\n2. Add per-tool decision criteria\nNotion, Slack, and GitHub are covered.",
-      1
+      1,
+      {
+        modelTimeMs: 4_000,
+        availableToolNames: ["get_agent_config", "suggest_prompt_edits"],
+      }
     );
 
     expect(result.finalScore).toBe(3);
@@ -167,5 +269,12 @@ describe("evaluateWithJudge audit-metrics wiring", () => {
       result.auditMetrics?.taskPlanning.structuredStepCount
     ).toBeGreaterThanOrEqual(2);
     expect(result.auditMetrics?.overall).toBeGreaterThan(0.5);
+    // Trace context feeds the A^2E efficiency/tool-group metrics.
+    expect(result.auditMetrics?.toolHallucination?.score).toBe(1);
+    expect(result.auditMetrics?.elapsedTime?.band).toBe("fast");
+    expect(
+      result.auditMetrics?.effectivenessEfficiencyTradeOff
+        ?.normalizedEffectiveness
+    ).toBe(1);
   });
 });
