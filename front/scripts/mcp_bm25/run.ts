@@ -71,6 +71,10 @@ import { WEB_SEARCH_BROWSE_SERVER } from "@app/lib/api/actions/servers/web_searc
 import { WORKDAY_SERVER } from "@app/lib/api/actions/servers/workday/metadata";
 import { WORKSPACE_ANALYTICS_SERVER } from "@app/lib/api/actions/servers/workspace_analytics/metadata";
 import { ZENDESK_SERVER } from "@app/lib/api/actions/servers/zendesk/metadata";
+import {
+  acquisitionCurve,
+  decideAcquisitionCount,
+} from "@app/scripts/mcp_bm25/acquisition";
 import { buildIndex, rank } from "@app/scripts/mcp_bm25/bm25";
 import type { ServerEntry } from "@app/scripts/mcp_bm25/corpus";
 import { buildDocs } from "@app/scripts/mcp_bm25/corpus";
@@ -217,9 +221,11 @@ function main(): void {
 
   let passed = 0;
   let top1 = 0;
+  const ranks: number[] = [];
   for (const { query, expected, maxRank = 1 } of QUERIES) {
     const ranked = rank(query, idx);
     const pos = ranked.findIndex((r) => r.name === expected) + 1;
+    ranks.push(pos);
     const ok = pos >= 1 && pos <= maxRank;
     if (ok) {
       passed++;
@@ -241,6 +247,34 @@ function main(): void {
   out("-".repeat(130));
   out(
     `top-1: ${top1}/${QUERIES.length}  |  within maxRank: ${passed}/${QUERIES.length}`
+  );
+
+  out("");
+  out(
+    "Acquisition stopping (CAM-DF-lite over ranked prefixes, simulated costs)"
+  );
+  out("  k    recall   cost/q   payoff   marginal   gap   decision");
+  const curve = acquisitionCurve({ ranks, maxCount: 20 });
+  for (const p of curve) {
+    if (p.count > 10 && !p.continues) {
+      continue;
+    }
+    out(
+      `  ${String(p.count).padStart(2)}  ${p.recall.toFixed(3).padStart(7)}` +
+        `  ${p.costPerQuery.toFixed(2).padStart(7)}` +
+        `  ${p.payoff.toFixed(3).padStart(8)}` +
+        `  ${p.marginalGain.toFixed(3).padStart(9)}` +
+        `  ${p.gapToBestContinuation.toFixed(3).padStart(6)}` +
+        `   ${p.continues ? "acquire more" : "stop"}`
+    );
+  }
+  const decision = decideAcquisitionCount(curve);
+  out("");
+  out(
+    `  decision-focused stop: k=${decision.count} ` +
+      `(payoff ${decision.payoff.toFixed(3)})  |  best payoff: ` +
+      `k=${decision.bestCount} (${decision.bestPayoff.toFixed(3)})  |  ` +
+      `regret ${decision.regret.toFixed(3)}`
   );
 }
 

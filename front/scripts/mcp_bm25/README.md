@@ -20,12 +20,31 @@ marker when it falls outside the allowed rank, and a top-1 summary.
 ## Files
 
 - `bm25.ts` — BM25 ranker (k1=1.2, b=0.75) and the tokenizer.
+- `acquisition.ts` — cost-aware stopping analysis over the ranked prefixes
+  (adapted from *Scores Are Not Decisions: Cost-Aware Stopping for Tool
+  Acquisition in LLM Agents*, arXiv:2607.27083).
 - `corpus.ts` — builds the document corpus from live server metadata. Each tool
   becomes one document = name + description + every description / property key /
   enum value in its input schema.
 - `queries.ts` — labeled queries (`query` -> server-qualified `expected` tool).
 - `run.ts` — wires the registered servers and queries together and prints the
   report.
+
+## Acquisition stopping
+
+After the recall table, `run.ts` prints a **cost-aware stopping** analysis. A
+ranking does not by itself say how many tools to acquire: too few leaves the
+task under-informed, too many adds cost, context load, and privacy exposure.
+For each prefix size `k` the report shows recall, simulated acquisition cost
+per query, payoff (hit value − cost), the marginal gain of the `k`-th tool, the
+offline gap between stopping at `k` and the best continuation, and the resulting
+acquire-more / stop label (CAM-DF-lite). The summary line gives the prefix the
+decision-focused rule stops at, the best-payoff prefix, and the regret between
+them.
+
+The default costs (hit value 1, 0.1 per tool) are placeholders; the point of
+the table is to see where recall saturates relative to what each additional
+tool costs, not to trust one specific number.
 
 ## Adding a server
 
