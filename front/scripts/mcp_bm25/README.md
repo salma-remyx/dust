@@ -52,3 +52,15 @@ A miss usually points to one of:
 The harness approximates a real index: it weights name, description, and input
 schema equally and uses crude singularization rather than full stemming.
 Treat the ranks as directional signal, not ground truth.
+
+## Scoring cost
+
+`sparse_index.ts` is an eagerly-scored variant of the ranker in `bm25.ts`: term
+weights are computed once at build time into an inverted index (term → postings
+of per-document contributions), so a query touches only the posting lists of
+its own terms instead of re-walking every document per query. Scores are
+identical to `bm25.ts` — only the cost model changes. `run.ts` reports the
+wall-clock cost of both over the labeled query set and cross-checks that their
+top-1 picks agree; a disagreement means a scorer bug, not a corpus problem.
+Adapted from *BM25S: Orders of magnitude faster lexical search via eager
+sparse scoring* (arXiv:2407.03618).

@@ -75,6 +75,10 @@ import { buildIndex, rank } from "@app/scripts/mcp_bm25/bm25";
 import type { ServerEntry } from "@app/scripts/mcp_bm25/corpus";
 import { buildDocs } from "@app/scripts/mcp_bm25/corpus";
 import { QUERIES } from "@app/scripts/mcp_bm25/queries";
+import {
+  buildSparseIndex,
+  rankSparse,
+} from "@app/scripts/mcp_bm25/sparse_index";
 import type { JSONSchema7 as JSONSchema } from "json-schema";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -242,6 +246,43 @@ function main(): void {
   out(
     `top-1: ${top1}/${QUERIES.length}  |  within maxRank: ${passed}/${QUERIES.length}`
   );
+
+  out("\nscorers");
+  out("-".repeat(130));
+  out(scorerReport(docs));
+}
+
+// Cross-checks the eager sparse index against the lazy per-query ranker on the
+// full labeled query set, and reports the wall-clock cost of each. The two must
+// agree on every rank — the sparse index changes the cost model, not the
+// scoring — so any disagreement means a scorer bug, not a corpus problem.
+function scorerReport(docs: ReturnType<typeof buildDocs>): string {
+  const lazyIndex = buildIndex(docs);
+  const sparseIndex = buildSparseIndex(docs);
+
+  let disagreements = 0;
+  const lazyStartMs = performance.now();
+  for (const { query } of QUERIES) {
+    if (
+      rank(query, lazyIndex)[0]?.name !==
+      rankSparse(query, sparseIndex)[0]?.name
+    ) {
+      disagreements++;
+    }
+  }
+  const lazyMs = performance.now() - lazyStartMs;
+
+  const sparseStartMs = performance.now();
+  for (const { query } of QUERIES) {
+    rankSparse(query, sparseIndex);
+  }
+  const sparseMs = performance.now() - sparseStartMs;
+
+  return [
+    `lazy   (bm25.ts)         ${QUERIES.length} queries in ${lazyMs.toFixed(1)}ms`,
+    `sparse (sparse_index.ts) ${QUERIES.length} queries in ${sparseMs.toFixed(1)}ms`,
+    `top-1 agreement: ${QUERIES.length - disagreements}/${QUERIES.length} queries`,
+  ].join("\n");
 }
 
 main();
